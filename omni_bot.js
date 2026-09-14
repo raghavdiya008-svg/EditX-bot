@@ -43,6 +43,7 @@ const AutonomousSentinelModule = require('./modules/autonomous_sentinel');
 const HousekeeperModule = require('./modules/housekeeper');
 const TagsModule = require('./modules/tags');
 const HiringModule = require('./modules/hiring');
+const TranslatorModule = require('./modules/translator');
 
 // Persistent Database Collections
 const db = {
@@ -101,6 +102,7 @@ const sentinel = new AutonomousSentinelModule(client, db);
 const housekeeper = new HousekeeperModule(client, db, sentinel);
 const tags = new TagsModule(client, db);
 const hiring = new HiringModule(client, db);
+const translator = new TranslatorModule(client, db);
 
 // All active modules list
 const modules = [
@@ -115,7 +117,8 @@ const modules = [
   sentinel,
   housekeeper,
   tags,
-  hiring
+  hiring,
+  translator
 ];
 
 client.once(Events.ClientReady, async () => {
@@ -175,7 +178,7 @@ client.on(Events.GuildMemberRemove, async (member) => {
   await roles.handleMemberLeave(member);
 });
 
-// Essential Event Routing: Honeypot, Autonomous Sentinel, Staff Copilot, Bump Buddy, Showcase Auto-Threads, Sticky Tags & Hiring Guard
+// Essential Event Routing: Honeypot, Autonomous Sentinel, Staff Copilot, Bump Buddy, Showcase Auto-Threads, Sticky Tags, Hiring Guard & Auto Translator
 client.on(Events.MessageCreate, async (message) => {
   if (!message.guild) return;
 
@@ -220,6 +223,9 @@ client.on(Events.MessageCreate, async (message) => {
 
   // 8. Hiring Channel Guard: Cleans off-topic chatter and routes through 1-click modal forms
   await hiring.checkMessage(message);
+
+  // 9. Auto English Translator: Detects foreign language messages and replies with instant English translation
+  await translator.checkMessage(message);
 });
 
 // Ghost-Ping Detection on Message Deletion

@@ -27,6 +27,7 @@ const QuickSetupModule = require('./modules/quick_setup');
 const HiringModule = require('./modules/hiring');
 const AutonomousSentinelModule = require('./modules/autonomous_sentinel');
 const HousekeeperModule = require('./modules/housekeeper');
+const TranslatorModule = require('./modules/translator');
 
 async function runTests() {
   console.log('====================================================');
@@ -926,7 +927,8 @@ async function runTests() {
       new AIModerationModule(mockClient, db),
       new DecorationModule(mockClient, db),
       new HiringModule(mockClient, db),
-      new HousekeeperModule(mockClient, db)
+      new HousekeeperModule(mockClient, db),
+      new TranslatorModule(mockClient, db)
     ];
 
     const allSlashCommands = modules.flatMap(m => m.getCommands());
@@ -1241,6 +1243,67 @@ async function runTests() {
     // Test briefing generator
     const briefingEmbed = await housekeeper.generateBriefingEmbed(mockGuild);
     assert.ok(briefingEmbed.data.title.includes('24/7 Autonomous Server Status Report'));
+  });
+
+  // 28. AUTO ENGLISH TRANSLATOR ENGINE
+  await test('28. Auto English Translator - Detection, Translation & Configuration', async () => {
+    const translator = new TranslatorModule(mockClient, db);
+
+    // 1. Test isLikelyNonEnglish detection
+    assert.strictEqual(translator.isLikelyNonEnglish('Hello everyone, how is your day going?'), false);
+    assert.strictEqual(translator.isLikelyNonEnglish('ok'), false); // Too short
+    assert.strictEqual(translator.isLikelyNonEnglish('https://google.com'), false); // URL
+
+    // Non-Latin scripts
+    assert.strictEqual(translator.isLikelyNonEnglish('Привет, как дела? Нужна помощь с монтажом видео'), true); // Russian
+    assert.strictEqual(translator.isLikelyNonEnglish('नमस्ते दोस्तों, क्या कोई वीडियो एडिट कर सकता है?'), true); // Hindi
+    assert.strictEqual(translator.isLikelyNonEnglish('مرحبا كيف حالكم جميعا اليوم'), true); // Arabic
+    assert.strictEqual(translator.isLikelyNonEnglish('こんにちは、動画編集の依頼をしたいです'), true); // Japanese
+
+    // Latin diacritics & Spanish phrases
+    assert.strictEqual(translator.isLikelyNonEnglish('Hola amigo, ¿puedes ayudarme con este proyecto?'), true); // Spanish
+    assert.strictEqual(translator.isLikelyNonEnglish('Bonjour tout le monde, j\'ai besoin d\'aide'), true); // French
+
+    // 2. Test Live Translation (e.g. Spanish -> English)
+    const spanishText = 'Hola amigos, ¿alguien puede ayudarme a exportar este video en Premiere Pro?';
+    const translation = await translator.translateToEnglish(spanishText);
+    assert.ok(translation, 'Translation result must be returned');
+    assert.ok(translation.translatedText.toLowerCase().includes('video') || translation.translatedText.toLowerCase().includes('premiere'), 'Translation must contain video/premiere keywords');
+    assert.strictEqual(translation.sourceLanguage, 'Spanish');
+
+    // 3. Test Caching (2nd call must hit translation cache)
+    const cached = await translator.translateToEnglish(spanishText);
+    assert.strictEqual(cached.translatedText, translation.translatedText);
+
+    // 4. Test Auto Message Check & Discord Reply
+    let replyPayload = null;
+    const foreignMessage = {
+      guild: mockGuild,
+      channel: { id: 'chat_global_1' },
+      author: { id: 'intl_user_1', bot: false },
+      content: 'Hola amigo, necesito ayuda con mis efectos de video',
+      reply: async (payload) => { replyPayload = payload; return payload; }
+    };
+
+    const handled = await translator.checkMessage(foreignMessage);
+    assert.strictEqual(handled, true, 'Foreign message must trigger auto-translation');
+    assert.ok(replyPayload, 'Reply must be sent');
+    assert.ok(replyPayload.content.includes('Auto-Translation'), 'Must have Auto-Translation tag');
+    assert.strictEqual(replyPayload.allowedMentions?.repliedUser, false, 'Must not ping author unnecessarily');
+
+    // 5. Test /translate slash commands
+    const staffMember = { ...mockMember, permissions: { has: () => true } };
+    let configReply = null;
+    await translator.handleCommand({
+      commandName: 'translate',
+      guild: mockGuild,
+      member: staffMember,
+      options: {
+        getSubcommand: () => 'config'
+      },
+      reply: async (payload) => { configReply = payload; }
+    });
+    assert.ok(configReply.embeds[0].data.title.includes('Auto English Translation Settings'));
   });
 
   console.log('\n====================================================');
