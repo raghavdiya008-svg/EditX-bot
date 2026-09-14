@@ -11,7 +11,22 @@ const {
   Routes,
   Events
 } = require('discord.js');
+const http = require('http');
 require('dotenv').config();
+
+// Built-in HTTP Health Check Server (Enables 24/7 Free Hosting on Render, Koyeb, Glitch, etc.)
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    status: 'online',
+    bot: 'EditX Discord Bot',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  }));
+}).listen(PORT, () => {
+  console.log(`[HTTP HEALTH CHECK] Online on port ${PORT} (24/7 ping ready)`);
+});
 
 const JSONDatabase = require('./database');
 
