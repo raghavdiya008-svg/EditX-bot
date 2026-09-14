@@ -213,7 +213,7 @@ Guidelines:
     if (this.gemini) {
       try {
         const res = await this.gemini.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.6-flash',
           contents: `${systemPrompt}\n\nUser Question:\n${prompt}`,
           config: {
             temperature: 0.7,
@@ -225,18 +225,6 @@ Guidelines:
         }
       } catch (geminiErr) {
         console.warn('[AI CHAT] Gemini attempt 1 failed:', geminiErr.message);
-        // Fallback model within Gemini
-        try {
-          const res2 = await this.gemini.models.generateContent({
-            model: 'gemini-1.5-flash',
-            contents: `${systemPrompt}\n\nUser Question:\n${prompt}`
-          });
-          if (res2.text && res2.text.trim()) {
-            return res2.text.trim();
-          }
-        } catch (geminiErr2) {
-          console.warn('[AI CHAT] Gemini fallback failed:', geminiErr2.message);
-        }
       }
     }
 
@@ -250,7 +238,7 @@ Guidelines:
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
+            model: 'groq/compound',
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: prompt }
@@ -262,8 +250,12 @@ Guidelines:
 
         if (groqRes.ok) {
           const data = await groqRes.json();
-          const reply = data.choices?.[0]?.message?.content;
+          let reply = data.choices?.[0]?.message?.content;
           if (reply && reply.trim()) {
+            // Remove reasoning header if present in output
+            if (reply.includes('**Answer**')) {
+              reply = reply.split('**Answer**').pop().trim();
+            }
             return reply.trim();
           }
         }
