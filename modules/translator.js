@@ -319,6 +319,16 @@ ${cleanText}
     const isAutoDisabled = this.db.get(`translate_disabled_${guildId}`, false);
     if (isAutoDisabled) return false;
 
+    // ── MUTE AWARENESS ──────────────────────────────────────────────────────────
+    // Respect server-wide silence (e.g. "@EditX don't send any kind of msg in this server")
+    const isServerMuted = Boolean(this.db.get(`aichat_muted_server_${guildId}`));
+    if (isServerMuted) return false;
+
+    // Respect per-channel silence (e.g. "@EditX don't reply in this channel")
+    const mutedChannels = this.db.get(`aichat_muted_${guildId}`) || [];
+    if (mutedChannels.includes(message.channel.id)) return false;
+    // ─────────────────────────────────────────────────────────────────────────────
+
     const ignoredChannels = this.db.get(`translate_ignore_channels_${guildId}`, []);
     if (ignoredChannels.includes(message.channel.id)) return false;
 
@@ -326,6 +336,7 @@ ${cleanText}
     if (!this.isLikelyNonEnglish(message.content)) {
       return false;
     }
+
 
     // Rate-limit per user to prevent translation spam
     const now = Date.now();

@@ -160,23 +160,25 @@ client.once(Events.ClientReady, async () => {
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   const commandData = commands.map(c => c.toJSON());
 
-  // 1. Clear any guild-scoped commands to eliminate double/duplicate slash commands
+  // Sync commands per-guild for INSTANT (<5s) availability instead of global (up to 1h delay).
+  // This guarantees /autopilot and all other commands appear immediately in Discord.
   for (const guild of client.guilds.cache.values()) {
     try {
-      await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: [] });
-      console.log(`[GUILD REGISTRY] Cleared duplicate guild commands for ${guild.name}`);
+      await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commandData });
+      console.log(`[GUILD REGISTRY] ✅ Synced ${commandData.length} commands instantly to ${guild.name}`);
     } catch (gErr) {
-      console.error(`[GUILD REGISTRY WARNING] Could not clear guild commands for ${guild.name}:`, gErr.message);
+      console.error(`[GUILD REGISTRY WARNING] Could not sync commands for ${guild.name}:`, gErr.message);
     }
   }
 
-  // 2. Global Sync (Single source of truth, guarantees exactly one entry per command)
+  // Also clear global commands so there are no stale duplicates from previous deployments
   try {
-    await rest.put(Routes.applicationCommands(client.user.id), { body: commandData });
-    console.log(`[GLOBAL REGISTRY] Synchronized ${commands.length} global Slash Commands (Zero duplicates).`);
+    await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
+    console.log('[GLOBAL REGISTRY] Cleared stale global commands (guild-scoped commands are now canonical).');
   } catch (err) {
-    console.error('[REGISTRY WARNING] Failed to sync global commands:', err.message);
+    console.warn('[GLOBAL REGISTRY] Could not clear global commands:', err.message);
   }
+
 
   // Run Autonomous Auto-Pilot across all connected servers (zero manual setup required)
   for (const guild of client.guilds.cache.values()) {
@@ -197,6 +199,16 @@ client.once(Events.ClientReady, async () => {
 
 // Guild Join Event
 client.on(Events.GuildCreate, async (guild) => {
+  // Instantly deploy all commands to the new guild
+  try {
+    const commands = [];
+    modules.forEach(m => { if (typeof m.getCommands === 'function') commands.push(...m.getCommands()); });
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
+    await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commands.map(c => c.toJSON()) });
+    console.log(`[GUILD REGISTRY] ✅ Synced ${commands.length} commands to new guild: ${guild.name}`);
+  } catch (err) {
+    console.warn(`[GUILD REGISTRY] Could not sync commands for ${guild.name}:`, err.message);
+  }
   await quickSetup.runAutoPilot(guild);
   await utility.handleGuildCreate(guild);
   await botMemory.initGuild(guild);
