@@ -1748,6 +1748,124 @@ async function runTests() {
     assert.strictEqual(db.utility.get('aichat_muted_server_scan_guild_99'), false, 'Server-wide mute must be cleared in DB');
   });
 
+  // 33. HIRING SUITE - /POST COMMAND, MODAL DIALOGS & AUTO-THREADING
+  await test('HiringModule - /post hiring, /post hireable, auto-threading & snapshot deduplication', async () => {
+    const hiring = new HiringModule(mockClient, db.utility);
+    const botMemory = new BotMemoryModule(mockClient, db);
+
+    // 1. Verify getCommands includes /post and /hiring
+    const cmds = hiring.getCommands();
+    assert.ok(cmds.some(c => c.name === 'post'), 'Must register /post command');
+    assert.ok(cmds.some(c => c.name === 'hiring'), 'Must register /hiring command');
+
+    const postCmd = cmds.find(c => c.name === 'post');
+    const subNames = postCmd.options.map(o => o.name);
+    assert.ok(subNames.includes('hiring'), '/post must include hiring subcommand');
+    assert.ok(subNames.includes('hireable'), '/post must include hireable subcommand');
+
+    // 2. Test /post hiring triggers showModal with hiring_submit_hiring
+    let shownModal = null;
+    const mockPostHiringInteraction = {
+      commandName: 'post',
+      options: {
+        getSubcommand: () => 'hiring'
+      },
+      channel: { id: 'c_hiring', name: 'hiring' },
+      guild: mockGuild,
+      showModal: async (modal) => { shownModal = modal; }
+    };
+    const handledPostHiring = await hiring.handleCommand(mockPostHiringInteraction);
+    assert.strictEqual(handledPostHiring, true, '/post hiring must be handled');
+    assert.ok(shownModal, 'Must show modal for /post hiring');
+    assert.strictEqual(shownModal.data.custom_id, 'hiring_submit_hiring', 'Modal custom_id must be hiring_submit_hiring');
+
+    // 3. Test /post hireable triggers showModal with hiring_submit_forhire
+    shownModal = null;
+    const mockPostHireableInteraction = {
+      commandName: 'post',
+      options: {
+        getSubcommand: () => 'hireable'
+      },
+      channel: { id: 'c_forhire', name: 'for-hire' },
+      guild: mockGuild,
+      showModal: async (modal) => { shownModal = modal; }
+    };
+    const handledPostHireable = await hiring.handleCommand(mockPostHireableInteraction);
+    assert.strictEqual(handledPostHireable, true, '/post hireable must be handled');
+    assert.ok(shownModal, 'Must show modal for /post hireable');
+    assert.strictEqual(shownModal.data.custom_id, 'hiring_submit_forhire', 'Modal custom_id must be hiring_submit_forhire');
+
+    // 4. Test Hiring channel direct post auto-threading
+    let threadCreated = null;
+    let threadMsgSent = null;
+    const mockHiringPostMessage = {
+      guild: mockGuild,
+      channel: {
+        id: 'c_hiring_direct',
+        name: 'hiring',
+        isThread: () => false
+      },
+      author: { id: 'poster_123', username: 'TestEditor', bot: false },
+      content: 'Looking for a Premiere Pro editor to cut 10 YouTube videos per month. Budget: $500.',
+      startThread: async (opts) => {
+        threadCreated = opts;
+        return {
+          id: 'thread_hiring_1',
+          send: async (msg) => { threadMsgSent = msg; return msg; }
+        };
+      }
+    };
+
+    await hiring.checkMessage(mockHiringPostMessage);
+    assert.ok(threadCreated, 'checkMessage must automatically start a thread in #hiring');
+    assert.ok(threadCreated.name.includes('Applications'), 'Thread name must indicate Applications');
+    assert.ok(threadCreated.name.includes('TestEditor'), 'Thread name must include poster username');
+    assert.ok(threadMsgSent && threadMsgSent.content.includes('Application & Inquiries Thread Opened'), 'Must send greeting message in thread');
+
+    // 5. Test Bot Memory deduplication during backupState
+    let deletedCount = 0;
+    let sentSnapshot = null;
+    const mockMemChan = {
+      id: 'mem_chan_99',
+      name: '🤖・bot-memory',
+      type: ChannelType.GuildText,
+      messages: {
+        fetch: async () => {
+          return new Map([
+            ['old_msg_1', {
+              id: 'old_msg_1',
+              author: { id: mockClient.user.id },
+              content: 'EDITX_STATE_SNAPSHOT_V1',
+              delete: async () => { deletedCount++; }
+            }],
+            ['old_msg_2', {
+              id: 'old_msg_2',
+              author: { id: mockClient.user.id },
+              content: 'EDITX_STATE_SNAPSHOT_V1',
+              delete: async () => { deletedCount++; }
+            }]
+          ]);
+        }
+      },
+      send: async (payload) => { sentSnapshot = payload; return { id: 'new_snapshot_msg' }; }
+    };
+
+    const mockMemGuild = {
+      ...mockGuild,
+      id: 'mem_dedup_guild',
+      channels: {
+        fetch: async () => new Map([['mem_chan_99', mockMemChan]]),
+        cache: new Map([['mem_chan_99', mockMemChan]])
+      }
+    };
+    botMemory.channelCache.set(mockMemGuild.id, { memoryChanId: 'mem_chan_99' });
+
+    const backupResult = await botMemory.backupState(mockMemGuild);
+    assert.strictEqual(backupResult.success, true, 'backupState must succeed');
+    assert.strictEqual(deletedCount, 2, 'Previous snapshot messages must be cleaned up to avoid channel clutter');
+    assert.ok(sentSnapshot, 'New snapshot must be sent');
+  });
+
   console.log('\n====================================================');
   console.log(`🏁 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('====================================================\n');

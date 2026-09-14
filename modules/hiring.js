@@ -14,7 +14,7 @@ const {
 class HiringModule {
   constructor(client, db) {
     this.client = client;
-    this.db = db.hiring || db.utility;
+    this.db = db?.hiring || db?.utility || db;
   }
 
   getCommands() {
@@ -24,8 +24,125 @@ class HiringModule {
           .addChannelOption(o => o.setName('channel').setDescription('Channel to deploy the portal (defaults to current)')))
         .addSubcommand(s => s.setName('template').setDescription('Display the official hiring and freelance posting rules'))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+        .setDMPermission(false),
+
+      new SlashCommandBuilder().setName('post').setDescription('Directly open the hiring or freelance posting form')
+        .addSubcommand(s => s.setName('hiring').setDescription('Post a job listing (Looking to hire editors / artists)'))
+        .addSubcommand(s => s.setName('hireable').setDescription('Post your freelance services (Available for hire)'))
         .setDMPermission(false)
     ];
+  }
+
+  buildHiringModal() {
+    const modal = new ModalBuilder()
+      .setCustomId('hiring_submit_hiring')
+      .setTitle('💼 Post a Job (Hiring)');
+
+    const roleInput = new TextInputBuilder()
+      .setCustomId('role')
+      .setLabel('Job Position / Role Needed')
+      .setPlaceholder('e.g. YouTube Video Editor, VFX Artist, Thumbnail Designer')
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(100)
+      .setRequired(true);
+
+    const budgetInput = new TextInputBuilder()
+      .setCustomId('budget')
+      .setLabel('Budget / Compensation Rate')
+      .setPlaceholder('e.g. $40-$60 per video, $500 fixed project, $25/hr')
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(100)
+      .setRequired(true);
+
+    const descInput = new TextInputBuilder()
+      .setCustomId('description')
+      .setLabel('Project Scope, Workload & Requirements')
+      .setPlaceholder('Describe the project details, required software, style, and expectations...')
+      .setStyle(TextInputStyle.Paragraph)
+      .setMaxLength(1000)
+      .setRequired(true);
+
+    const timelineInput = new TextInputBuilder()
+      .setCustomId('timeline')
+      .setLabel('Deadline / Project Timeline')
+      .setPlaceholder('e.g. Within 48 hours, Ongoing monthly contract')
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(100)
+      .setRequired(false);
+
+    const contactInput = new TextInputBuilder()
+      .setCustomId('contact')
+      .setLabel('How to Apply / Contact Info')
+      .setPlaceholder('e.g. DM me on Discord with your portfolio, or Email: ...')
+      .setStyle(TextInputStyle.Paragraph)
+      .setMaxLength(200)
+      .setRequired(true);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(roleInput),
+      new ActionRowBuilder().addComponents(budgetInput),
+      new ActionRowBuilder().addComponents(descInput),
+      new ActionRowBuilder().addComponents(timelineInput),
+      new ActionRowBuilder().addComponents(contactInput)
+    );
+
+    return modal;
+  }
+
+  buildForHireModal() {
+    const modal = new ModalBuilder()
+      .setCustomId('hiring_submit_forhire')
+      .setTitle('🎨 Post Services (For Hire)');
+
+    const titleInput = new TextInputBuilder()
+      .setCustomId('title')
+      .setLabel('Service / Skill Specialty')
+      .setPlaceholder('e.g. Pro Thumbnail Artist & High CTR Packaging')
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(100)
+      .setRequired(true);
+
+    const ratesInput = new TextInputBuilder()
+      .setCustomId('rates')
+      .setLabel('Pricing & Starting Rates')
+      .setPlaceholder('e.g. Thumbnails from $25, Short edits from $45')
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(100)
+      .setRequired(true);
+
+    const portfolioInput = new TextInputBuilder()
+      .setCustomId('portfolio')
+      .setLabel('Portfolio / Showcase Link')
+      .setPlaceholder('e.g. https://behance.net/..., https://youtube.com/...')
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(250)
+      .setRequired(true);
+
+    const descInput = new TextInputBuilder()
+      .setCustomId('description')
+      .setLabel('About Your Skills, Experience & Software')
+      .setPlaceholder('Detail your experience, software proficiency (Premiere, AE, Blender), and turnaround...')
+      .setStyle(TextInputStyle.Paragraph)
+      .setMaxLength(1000)
+      .setRequired(true);
+
+    const contactInput = new TextInputBuilder()
+      .setCustomId('contact')
+      .setLabel('Availability & Contact Preference')
+      .setPlaceholder('e.g. DMs open, Available 20 hrs/week, Timezone: EST')
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(150)
+      .setRequired(true);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(titleInput),
+      new ActionRowBuilder().addComponents(ratesInput),
+      new ActionRowBuilder().addComponents(portfolioInput),
+      new ActionRowBuilder().addComponents(descInput),
+      new ActionRowBuilder().addComponents(contactInput)
+    );
+
+    return modal;
   }
 
   buildPortalEmbed(guild) {
@@ -38,15 +155,14 @@ class HiringModule {
       .setTitle('💼・COMMUNITY RECRUITMENT & FREELANCE PORTAL')
       .setDescription(
         `Welcome to the **${serverName}** Hiring & Freelance Desk.\n\n` +
-        `To ensure the highest quality, safety, and organization, **direct chatting is disabled in this channel**.\n` +
-        `Click one of the buttons below to open our official in-server form and publish your listing:\n\n` +
+        `Click one of the buttons below or use \`/post hiring\` / \`/post hireable\` to open the form and publish your listing:\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         `💼 **Post a Job (Hiring)**\n` +
         `▸ Looking to hire video editors, thumbnail designers, 3D artists, sound designers, or moderators.\n\n` +
         `🎨 **Post Freelance Services (For Hire)**\n` +
         `▸ Showcase your creative skills, portfolio links, rates, and service offerings to the community.\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `⚠️ *All listings must specify fair budgets or pricing. Spam, scam links, and zero-effort posts are automatically removed.*`
+        `⚠️ *All listings automatically receive dedicated inquiry threads for smooth discussions.*`
       )
       .setFooter({ text: `${serverName} • Verified Recruitment Portal`, iconURL: serverIcon });
 
@@ -72,6 +188,22 @@ class HiringModule {
 
   async handleCommand(interaction) {
     const { commandName, options, channel, guild } = interaction;
+
+    if (commandName === 'post') {
+      const sub = options.getSubcommand();
+      if (sub === 'hiring') {
+        const modal = this.buildHiringModal();
+        await interaction.showModal(modal);
+        return true;
+      }
+      if (sub === 'hireable') {
+        const modal = this.buildForHireModal();
+        await interaction.showModal(modal);
+        return true;
+      }
+      return false;
+    }
+
     if (commandName !== 'hiring') return false;
 
     const sub = options.getSubcommand();
@@ -89,7 +221,7 @@ class HiringModule {
       this.db.set(`hiring_chan_${guild.id}`, targetChannel.id);
 
       return interaction.reply({
-        content: `✅ Hiring & Freelance Portal successfully deployed to <#${targetChannel.id}>!\nDirect chatting in this channel is now guarded and routed through the 1-click modal forms.`,
+        content: `✅ Hiring & Freelance Portal successfully deployed to <#${targetChannel.id}>!\nMembers can now use the portal buttons or \`/post hiring\` / \`/post hireable\` anytime.`,
         ephemeral: true
       });
     }
@@ -122,116 +254,12 @@ class HiringModule {
     // 1. Button Clicks (Open Modal)
     if (interaction.isButton()) {
       if (interaction.customId === 'hiring_modal_hiring') {
-        const modal = new ModalBuilder()
-          .setCustomId('hiring_submit_hiring')
-          .setTitle('💼 Post a Job (Hiring)');
-
-        const roleInput = new TextInputBuilder()
-          .setCustomId('role')
-          .setLabel('Job Position / Role Needed')
-          .setPlaceholder('e.g. YouTube Video Editor, VFX Artist, Thumbnail Designer')
-          .setStyle(TextInputStyle.Short)
-          .setMaxLength(100)
-          .setRequired(true);
-
-        const budgetInput = new TextInputBuilder()
-          .setCustomId('budget')
-          .setLabel('Budget / Compensation Rate')
-          .setPlaceholder('e.g. $40-$60 per video, $500 fixed project, $25/hr')
-          .setStyle(TextInputStyle.Short)
-          .setMaxLength(100)
-          .setRequired(true);
-
-        const descInput = new TextInputBuilder()
-          .setCustomId('description')
-          .setLabel('Project Scope, Workload & Requirements')
-          .setPlaceholder('Describe the project details, required software, style, and expectations...')
-          .setStyle(TextInputStyle.Paragraph)
-          .setMaxLength(1000)
-          .setRequired(true);
-
-        const timelineInput = new TextInputBuilder()
-          .setCustomId('timeline')
-          .setLabel('Deadline / Project Timeline')
-          .setPlaceholder('e.g. Within 48 hours, Ongoing monthly contract')
-          .setStyle(TextInputStyle.Short)
-          .setMaxLength(100)
-          .setRequired(false);
-
-        const contactInput = new TextInputBuilder()
-          .setCustomId('contact')
-          .setLabel('How to Apply / Contact Info')
-          .setPlaceholder('e.g. DM me on Discord with your portfolio, or Email: ...')
-          .setStyle(TextInputStyle.Paragraph)
-          .setMaxLength(200)
-          .setRequired(true);
-
-        modal.addComponents(
-          new ActionRowBuilder().addComponents(roleInput),
-          new ActionRowBuilder().addComponents(budgetInput),
-          new ActionRowBuilder().addComponents(descInput),
-          new ActionRowBuilder().addComponents(timelineInput),
-          new ActionRowBuilder().addComponents(contactInput)
-        );
-
-        await interaction.showModal(modal);
+        await interaction.showModal(this.buildHiringModal());
         return true;
       }
 
       if (interaction.customId === 'hiring_modal_forhire') {
-        const modal = new ModalBuilder()
-          .setCustomId('hiring_submit_forhire')
-          .setTitle('🎨 Post Services (For Hire)');
-
-        const titleInput = new TextInputBuilder()
-          .setCustomId('title')
-          .setLabel('Service / Skill Specialty')
-          .setPlaceholder('e.g. Pro Thumbnail Artist & High CTR Packaging')
-          .setStyle(TextInputStyle.Short)
-          .setMaxLength(100)
-          .setRequired(true);
-
-        const ratesInput = new TextInputBuilder()
-          .setCustomId('rates')
-          .setLabel('Pricing & Starting Rates')
-          .setPlaceholder('e.g. Thumbnails from $25, Short edits from $45')
-          .setStyle(TextInputStyle.Short)
-          .setMaxLength(100)
-          .setRequired(true);
-
-        const portfolioInput = new TextInputBuilder()
-          .setCustomId('portfolio')
-          .setLabel('Portfolio / Showcase Link')
-          .setPlaceholder('e.g. https://behance.net/..., https://youtube.com/...')
-          .setStyle(TextInputStyle.Short)
-          .setMaxLength(250)
-          .setRequired(true);
-
-        const descInput = new TextInputBuilder()
-          .setCustomId('description')
-          .setLabel('About Your Skills, Experience & Software')
-          .setPlaceholder('Detail your experience, software proficiency (Premiere, AE, Blender), and turnaround...')
-          .setStyle(TextInputStyle.Paragraph)
-          .setMaxLength(1000)
-          .setRequired(true);
-
-        const contactInput = new TextInputBuilder()
-          .setCustomId('contact')
-          .setLabel('Availability & Contact Preference')
-          .setPlaceholder('e.g. DMs open, Available 20 hrs/week, Timezone: EST')
-          .setStyle(TextInputStyle.Short)
-          .setMaxLength(150)
-          .setRequired(true);
-
-        modal.addComponents(
-          new ActionRowBuilder().addComponents(titleInput),
-          new ActionRowBuilder().addComponents(ratesInput),
-          new ActionRowBuilder().addComponents(portfolioInput),
-          new ActionRowBuilder().addComponents(descInput),
-          new ActionRowBuilder().addComponents(contactInput)
-        );
-
-        await interaction.showModal(modal);
+        await interaction.showModal(this.buildForHireModal());
         return true;
       }
 
@@ -304,13 +332,20 @@ class HiringModule {
         const postMsg = await targetChan.send({ content: `<@${user.id}>`, embeds: [embed], components: [row] });
 
         // Auto-create thread for applicant discussions
-        if (targetChan.type === ChannelType.GuildText && targetChan.threads) {
+        if (typeof postMsg.startThread === 'function') {
           try {
-            await postMsg.startThread({
-              name: `💼 Inquiries • ${role.slice(0, 30)} (${user.username})`,
+            const thread = await postMsg.startThread({
+              name: `💼 Applications • ${role.slice(0, 25)} (${user.username})`,
               autoArchiveDuration: 1440
             });
-          } catch (tErr) {}
+            if (thread && typeof thread.send === 'function') {
+              await thread.send({
+                content: `💬 **Discussion & Applications Thread Opened!**\nMembers can ask questions, discuss rates, or submit their portfolios to <@${user.id}> here instead of clogging DMs.`
+              }).catch(() => {});
+            }
+          } catch (tErr) {
+            console.warn('[HIRING MODAL THREAD NOTICE]', tErr.message);
+          }
         }
 
         return interaction.reply({
@@ -326,7 +361,7 @@ class HiringModule {
         const description = interaction.fields.getTextInputValue('description');
         const contact = interaction.fields.getTextInputValue('contact');
 
-        const forHireChanId = this.db.get(`forhire_chan_${guild.id}`) || interaction.channel.id;
+        const forHireChanId = this.db?.get ? this.db.get(`forhire_chan_${guild.id}`) : null || interaction.channel.id;
         const targetChan = guild.channels.cache.get(forHireChanId) || interaction.channel;
 
         const embed = new EmbedBuilder()
@@ -362,13 +397,20 @@ class HiringModule {
         const postMsg = await targetChan.send({ content: `<@${user.id}>`, embeds: [embed], components: [row] });
 
         // Auto-create thread for inquiries
-        if (targetChan.type === ChannelType.GuildText && targetChan.threads) {
+        if (typeof postMsg.startThread === 'function') {
           try {
-            await postMsg.startThread({
-              name: `🎨 Showcase • ${title.slice(0, 30)} (${user.username})`,
+            const thread = await postMsg.startThread({
+              name: `🎨 Inquiries • ${title.slice(0, 25)} (${user.username})`,
               autoArchiveDuration: 1440
             });
-          } catch (tErr) {}
+            if (thread && typeof thread.send === 'function') {
+              await thread.send({
+                content: `💬 **Freelance Inquiries Thread Opened!**\nClients can ask questions, request quotes, or commission work from <@${user.id}> here.`
+              }).catch(() => {});
+            }
+          } catch (tErr) {
+            console.warn('[FOR HIRE MODAL THREAD NOTICE]', tErr.message);
+          }
         }
 
         return interaction.reply({
@@ -382,42 +424,71 @@ class HiringModule {
   }
 
   async checkMessage(message) {
-    if (!message.guild || message.author.bot) return;
-
-    const guildId = message.guild.id;
-    const hiringChanId = this.db.get(`hiring_chan_${guildId}`);
-    const forHireChanId = this.db.get(`forhire_chan_${guildId}`);
-
-    const isHiringChannel = (hiringChanId && message.channel.id === hiringChanId) ||
-      (forHireChanId && message.channel.id === forHireChanId) ||
-      (message.channel.name && (
-        message.channel.name.includes('hiring') ||
-        message.channel.name.includes('for-hire') ||
-        message.channel.name.includes('job-postings') ||
-        message.channel.name.includes('freelance-board')
-      ));
-
-    if (!isHiringChannel) return;
-
-    // Staff/Admin exempt
-    const isStaff = message.member?.permissions?.has(PermissionFlagsBits.ManageMessages) ||
-      message.member?.permissions?.has(PermissionFlagsBits.Administrator) ||
-      message.author.id === message.guild.ownerId;
-
-    if (isStaff) return;
+    if (!message.guild || message.author?.bot) return;
 
     // If message is in a Thread under the post, allow normal discussions
-    if (typeof message.channel.isThread === 'function' && message.channel.isThread()) return;
+    if (typeof message.channel?.isThread === 'function' && message.channel.isThread()) return;
 
-    // Direct message sent to main channel: Delete and prompt to use buttons
+    const guildId = message.guild.id;
+    const hiringChanId = this.db?.get ? this.db.get(`hiring_chan_${guildId}`) : null;
+    const forHireChanId = this.db?.get ? this.db.get(`forhire_chan_${guildId}`) : null;
+
+    const chanName = (message.channel?.name || '').toLowerCase();
+    const isHiring = (hiringChanId && message.channel?.id === hiringChanId) || chanName.includes('hiring') || chanName.includes('job-postings');
+    const isForHire = (forHireChanId && message.channel?.id === forHireChanId) || chanName.includes('for-hire') || chanName.includes('hireable') || chanName.includes('freelance');
+
+    if (!isHiring && !isForHire) return;
+
+    // Staff / Admin check
+    const isStaff = message.member?.permissions?.has?.(PermissionFlagsBits.ManageMessages) ||
+      message.member?.permissions?.has?.(PermissionFlagsBits.Administrator) ||
+      message.author?.id === message.guild.ownerId;
+
+    const content = (message.content || '').trim();
+    const hasAttachments = message.attachments && (message.attachments.size > 0 || (Array.isArray(message.attachments) && message.attachments.length > 0));
+    const isSubstantialListing = content.length >= 25 || hasAttachments || /https?:\/\//i.test(content);
+
+    // If it's a substantive job posting or showcase, auto-create thread
+    if (isSubstantialListing && typeof message.startThread === 'function') {
+      try {
+        const threadTitle = isHiring
+          ? `💼 Applications • ${message.author.username.slice(0, 25)}`
+          : `🎨 Inquiries • ${message.author.username.slice(0, 25)}`;
+
+        const thread = await message.startThread({
+          name: threadTitle,
+          autoArchiveDuration: 1440
+        });
+
+        const greeting = isHiring
+          ? `👋 **Application & Inquiries Thread Opened!**\nDiscuss project terms, ask questions, or submit your portfolio for <@${message.author.id}> here instead of clogging DMs.`
+          : `👋 **Client Inquiries Thread Opened!**\nInquire about rates, project availability, or commissions for <@${message.author.id}> here.`;
+
+        if (thread && typeof thread.send === 'function') {
+          await thread.send({ content: greeting }).catch(() => {});
+        }
+        return;
+      } catch (tErr) {
+        console.warn('[AUTO-THREAD NOTICE]', tErr.message);
+      }
+    }
+
+    // Staff exempt from deletion for announcements/admin notices
+    if (isStaff) return;
+
+    // Otherwise, it is off-topic casual chatter: delete and guide to /post
     try {
-      await message.delete().catch(() => {});
-      const alert = await message.channel.send({
-        content: `⚠️ <@${message.author.id}>, direct chatting in this channel is disabled to keep listings organized. Please click the **Post a Job** or **Post Services** button at the top of <#${message.channel.id}> to submit your listing!`
-      }).catch(() => null);
+      if (typeof message.delete === 'function') {
+        await message.delete().catch(() => {});
+      }
+      if (message.channel && typeof message.channel.send === 'function') {
+        const alert = await message.channel.send({
+          content: `⚠️ <@${message.author.id}>, direct chatting in this channel is disabled to keep listings organized. Please click the **Post a Job** or **Post Services** button at the top of <#${message.channel.id}> or use \`/post hiring\` / \`/post hireable\` to submit your listing!`
+        }).catch(() => null);
 
-      if (alert) {
-        setTimeout(() => alert.delete().catch(() => {}), 6000);
+        if (alert && typeof alert.delete === 'function') {
+          setTimeout(() => alert.delete().catch(() => {}), 6000);
+        }
       }
     } catch (e) {}
   }

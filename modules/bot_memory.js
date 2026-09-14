@@ -385,8 +385,21 @@ class BotMemoryModule {
           `• Server-Wide Mute: \`${stateSnapshot.utility.aichat_muted_server ? 'Active (Silent)' : 'Disabled'}\`\n` +
           `• Stats Channels: ${stateSnapshot.utility.stats_channels ? 'Configured' : 'None'}`
         )
-        .setFooter({ text: 'EditX State Vault • Auto-restores across Render deployments' })
-        .setTimestamp();
+      // Clean up previous snapshot messages so #bot-memory stays completely clean and uncluttered
+      if (memChan.messages && typeof memChan.messages.fetch === 'function') {
+        try {
+          const prevMessages = await memChan.messages.fetch({ limit: 15 }).catch(() => null);
+          if (prevMessages && prevMessages.size > 0) {
+            for (const m of prevMessages.values()) {
+              if (m.author?.id === this.client.user?.id && m.content && m.content.includes('EDITX_STATE_SNAPSHOT_V1')) {
+                if (typeof m.delete === 'function') {
+                  await m.delete().catch(() => {});
+                }
+              }
+            }
+          }
+        } catch (cleanErr) {}
+      }
 
       const msg = await memChan.send({
         content: `📦 **EDITX_STATE_SNAPSHOT_V1** \`[${stateSnapshot.iso}]\``,
