@@ -160,20 +160,20 @@ client.once(Events.ClientReady, async () => {
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   const commandData = commands.map(c => c.toJSON());
 
-  // 1. Instant Guild Sync (Slash commands update immediately in all connected guilds)
+  // 1. Clear any guild-scoped commands to eliminate double/duplicate slash commands
   for (const guild of client.guilds.cache.values()) {
     try {
-      await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commandData });
-      console.log(`[GUILD REGISTRY] Instantly registered ${commands.length} commands to guild: ${guild.name}`);
+      await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: [] });
+      console.log(`[GUILD REGISTRY] Cleared duplicate guild commands for ${guild.name}`);
     } catch (gErr) {
-      console.error(`[GUILD REGISTRY WARNING] Could not sync guild commands for ${guild.name}:`, gErr.message);
+      console.error(`[GUILD REGISTRY WARNING] Could not clear guild commands for ${guild.name}:`, gErr.message);
     }
   }
 
-  // 2. Global Sync (Ensures global presence across Discord infrastructure)
+  // 2. Global Sync (Single source of truth, guarantees exactly one entry per command)
   try {
     await rest.put(Routes.applicationCommands(client.user.id), { body: commandData });
-    console.log(`[GLOBAL REGISTRY] Synchronized ${commands.length} global Slash Commands.`);
+    console.log(`[GLOBAL REGISTRY] Synchronized ${commands.length} global Slash Commands (Zero duplicates).`);
   } catch (err) {
     console.error('[REGISTRY WARNING] Failed to sync global commands:', err.message);
   }
