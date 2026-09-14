@@ -1,0 +1,237 @@
+/**
+ * OMNI BOT - Enterprise All-in-One Discord System (V5 Supreme)
+ * Self-sufficient engine replacing Beemo, Honeypot, Invite Tracker, Welcomer, Ticket Tool, Wick, and Carl-bot.
+ */
+
+const {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  REST,
+  Routes,
+  Events
+} = require('discord.js');
+require('dotenv').config();
+
+const JSONDatabase = require('./database');
+
+// Load Essential Focused Modules
+const QuickSetupModule = require('./modules/quick_setup');
+const UtilityModule = require('./modules/utility');
+const TicketsModule = require('./modules/tickets');
+const ModerationModule = require('./modules/moderation');
+const DecorationModule = require('./modules/decoration');
+const RolesModule = require('./modules/roles');
+const LoggingModule = require('./modules/logging');
+const AIModerationModule = require('./modules/ai_moderator');
+const TagsModule = require('./modules/tags');
+const HiringModule = require('./modules/hiring');
+
+// Persistent Database Collections
+const db = {
+  config: new JSONDatabase('config'),
+  xp: new JSONDatabase('xp'),
+  security: new JSONDatabase('security'),
+  cases: new JSONDatabase('cases'),
+  tickets: new JSONDatabase('tickets'),
+  invites: new JSONDatabase('invites'),
+  roles: new JSONDatabase('roles'),
+  utility: new JSONDatabase('utility'),
+  giveaways: new JSONDatabase('giveaways'),
+  starboard: new JSONDatabase('starboard'),
+  tags: new JSONDatabase('tags'),
+  verification: new JSONDatabase('verification'),
+  social: new JSONDatabase('social')
+};
+
+const TOKEN = process.env.DISCORD_TOKEN || process.env.DISCORD_BOT_TOKEN;
+if (!TOKEN) {
+  console.error('[FATAL ERROR] Missing DISCORD_TOKEN in environment (.env).');
+  process.exit(1);
+}
+
+process.on('unhandledRejection', (reason) => console.error('[UNHANDLED REJECTION]', reason));
+process.on('uncaughtException', (err) => console.error('[UNCAUGHT EXCEPTION]', err));
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildInvites,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessageReactions
+  ],
+  partials: [Partials.Message, Partials.Channel, Partials.GuildMember, Partials.Reaction, Partials.User],
+  sweepers: { messages: { interval: 1800, lifetime: 900 } }
+});
+
+// Invite cache for tracking
+client.inviteCache = new Map();
+
+// Initialize Essential Focused Modules
+const quickSetup = new QuickSetupModule(client, db);
+const utility = new UtilityModule(client, db);
+const tickets = new TicketsModule(client, db);
+const moderation = new ModerationModule(client, db);
+const decoration = new DecorationModule(client, db);
+const roles = new RolesModule(client, db);
+const logging = new LoggingModule(client, db);
+const aiModerator = new AIModerationModule(client, db);
+const tags = new TagsModule(client, db);
+const hiring = new HiringModule(client, db);
+
+// All active modules list
+const modules = [
+  quickSetup,
+  utility,
+  tickets,
+  moderation,
+  decoration,
+  roles,
+  logging,
+  aiModerator,
+  tags,
+  hiring
+];
+
+client.once(Events.ClientReady, async () => {
+  console.log(`[BOOT SUCCESS] Omni Enterprise System online as: ${client.user.tag}`);
+
+  // Collect all commands
+  const commands = [];
+  modules.forEach(m => {
+    if (typeof m.getCommands === 'function') {
+      commands.push(...m.getCommands());
+    }
+  });
+
+  const rest = new REST({ version: '10' }).setToken(TOKEN);
+  const commandData = commands.map(c => c.toJSON());
+
+  // 1. Clear any guild-scoped commands to eliminate double/duplicate slash commands
+  for (const guild of client.guilds.cache.values()) {
+    try {
+      await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: [] });
+    } catch (gErr) {
+      console.error(`[GUILD REGISTRY WARNING] Could not clear guild commands for ${guild.name}:`, gErr.message);
+    }
+  }
+
+  // 2. Global Sync (Single source of truth, guarantees exactly one entry per command)
+  try {
+    await rest.put(Routes.applicationCommands(client.user.id), { body: commandData });
+    console.log(`[GLOBAL REGISTRY] Synchronized ${commands.length} global Slash Commands (Zero duplicates).`);
+  } catch (err) {
+    console.error('[REGISTRY WARNING] Failed to sync global commands:', err.message);
+  }
+
+  // Pre-fetch invites across guilds
+  for (const guild of client.guilds.cache.values()) {
+    await utility.handleGuildCreate(guild);
+  }
+  console.log(`[INVITES] Cached invite tracking for ${client.inviteCache.size} guild(s).`);
+});
+
+// Member Lifecycle Events (Welcomer & Invite Tracking & Auto-Roles)
+client.on(Events.GuildMemberAdd, async (member) => {
+  await utility.handleJoin(member);
+  await roles.handleMemberJoin(member);
+});
+
+client.on(Events.GuildMemberRemove, async (member) => {
+  await utility.handleLeave(member);
+  await roles.handleMemberLeave(member);
+});
+
+// Essential Event Routing: Honeypot, AI Mod Sentinel, Bump Buddy, Sticky Tags & Hiring Guard
+client.on(Events.MessageCreate, async (message) => {
+  if (!message.guild) return;
+
+  // 1. Honeypot Trap: unauthorized accounts speaking in honeypot are softbanned immediately
+  const isHoneypot = await moderation.checkHoneypot(message);
+  if (isHoneypot) return;
+
+  // 2. AI Moderation Copilot: Scans suspicious content and reports to mods in report-only mode
+  await aiModerator.checkMessage(message);
+
+  // 3. Bump Buddy: Inspects Disboard / Bump Buddy confirmations
+  utility.checkBump(message);
+
+  // 4. Tags, AFK, Auto-Responders & Persistent Sticky Message Reposting
+  await tags.checkMessage(message);
+
+  // 5. Hiring Channel Guard: Cleans off-topic chatter and routes through 1-click modal forms
+  await hiring.checkMessage(message);
+});
+
+// Unified Interaction Router (Commands, Buttons, Menus, Modals)
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.guild) {
+    if (interaction.isRepliable()) {
+      return interaction.reply({ content: '❌ Commands are only supported within server channels.', ephemeral: true }).catch(() => {});
+    }
+    return;
+  }
+
+  // Component & Modal Interactions (Buttons / Menus / Modals)
+  if (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) {
+    const handledByHiring = await hiring.handleInteraction(interaction);
+    if (handledByHiring) return;
+
+    const handledByAI = await aiModerator.handleInteraction(interaction);
+    if (handledByAI) return;
+
+    const handledByRoles = await roles.handleInteraction(interaction);
+    if (handledByRoles) return;
+
+    const handledByTickets = await tickets.handleInteraction(interaction);
+    if (handledByTickets) return;
+
+    const handledByUtility = await utility.handleInteraction(interaction);
+    if (handledByUtility) return;
+
+    return;
+  }
+
+  // Slash Command Dispatcher
+  if (!interaction.isChatInputCommand()) return;
+
+  for (const mod of modules) {
+    if (typeof mod.handleCommand === 'function') {
+      try {
+        const handled = await mod.handleCommand(interaction);
+        if (handled) return;
+      } catch (err) {
+        console.error(`[COMMAND ERROR in ${mod.constructor.name}]`, err);
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ content: `❌ An unexpected error occurred while executing this command.` }).catch(() => {});
+        } else {
+          await interaction.reply({ content: `❌ An unexpected error occurred while executing this command.`, ephemeral: true }).catch(() => {});
+        }
+        return;
+      }
+    }
+  }
+
+  if (!interaction.replied && !interaction.deferred) {
+    interaction.reply({ content: '❓ Unknown or unhandled command.', ephemeral: true }).catch(() => {});
+  }
+});
+
+// Honeypot Reaction Trap
+client.on(Events.MessageReactionAdd, (reaction, user) => {
+  moderation.checkHoneypotReaction(reaction, user);
+});
+
+// Anti-Nuke & Server Protection yielded exclusively to Wick Bot
+
+// Invite Tracking Delegations
+client.on(Events.InviteCreate, i => utility.handleInviteCreate(i));
+client.on(Events.InviteDelete, i => utility.handleInviteDelete(i));
+client.on(Events.GuildCreate, g => utility.handleGuildCreate(g));
+client.on(Events.GuildDelete, g => utility.handleGuildDelete(g));
+
+client.login(TOKEN);

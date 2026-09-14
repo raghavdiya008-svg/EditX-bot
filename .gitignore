@@ -1,0 +1,22 @@
+# Environment variables & API Keys (DO NOT COMMIT SECRETS)
+.env
+.env.local
+.env.*.local
+api.txt
+
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database & Runtime State (Keep repository clean)
+data/*.json
+data/*.tmp
+!data/.gitkeep
+
+# OS & Editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
