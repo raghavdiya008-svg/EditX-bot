@@ -1197,17 +1197,17 @@ class UtilityModule {
     } else {
       // Clean, elegant obsidian luxury card background
       const darkGrad = ctx.createLinearGradient(0, 0, width, height);
-      darkGrad.addColorStop(0, '#15171E');
-      darkGrad.addColorStop(0.5, '#1A1D26');
-      darkGrad.addColorStop(1, '#1E222D');
+      darkGrad.addColorStop(0, '#0F1117');
+      darkGrad.addColorStop(0.5, '#141721');
+      darkGrad.addColorStop(1, '#1A1D2B');
       ctx.fillStyle = darkGrad;
       ctx.beginPath();
       ctx.roundRect(0, 0, width, height, 16);
       ctx.fill();
 
       // Subtle ambient avatar glow
-      const avatarGlow = ctx.createRadialGradient(95, 105, 10, 95, 105, 150);
-      avatarGlow.addColorStop(0, isJoin ? 'rgba(99, 102, 241, 0.22)' : 'rgba(239, 68, 68, 0.2)');
+      const avatarGlow = ctx.createRadialGradient(100, 105, 10, 100, 105, 160);
+      avatarGlow.addColorStop(0, isJoin ? 'rgba(99, 102, 241, 0.28)' : 'rgba(239, 68, 68, 0.25)');
       avatarGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
       ctx.fillStyle = avatarGlow;
       ctx.beginPath();
@@ -1217,7 +1217,7 @@ class UtilityModule {
 
     // Outer crisp border
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
     ctx.beginPath();
     ctx.roundRect(1, 1, width - 2, height - 2, 16);
     ctx.stroke();
@@ -1246,28 +1246,43 @@ class UtilityModule {
       } catch (e) {}
     }
 
-    // Crisp white avatar ring
+    // Crisp glowing avatar ring
     ctx.lineWidth = 3.5;
-    ctx.strokeStyle = '#FFFFFF';
+    ctx.strokeStyle = isJoin ? '#6366F1' : '#EF4444';
     ctx.beginPath();
     ctx.arc(avX, avY, avRadius, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Right Side: Clean Typography
-    const textX = 180;
+    // Right Side: Clean Typography & Modern Pill Badge
+    const textX = 185;
     let name = member.user?.username || member.displayName || 'Member';
     if (name.length > 20) name = name.substring(0, 20) + '...';
+
+    // Top Pill Badge
+    if (isJoin) {
+      ctx.fillStyle = 'rgba(99, 102, 241, 0.18)';
+      ctx.beginPath();
+      ctx.roundRect(textX, 42, 125, 24, 12);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(99, 102, 241, 0.45)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.fillStyle = '#818CF8';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText(`MEMBER #${memberNum}`, textX + 18, 58);
+    }
 
     // Line 1: Welcome [Username]
     ctx.font = 'bold 28px sans-serif';
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillText(isJoin ? `Welcome ${name}` : `Goodbye ${name}`, textX, 94);
+    ctx.fillText(name, textX, isJoin ? 104 : 94);
 
     // Line 2: to [Server] you are the [144th] member!
-    ctx.font = '17px sans-serif';
+    ctx.font = '16px sans-serif';
     ctx.fillStyle = '#94A3B8';
-    const subText = isJoin ? `to ${serverName} you are the ${ordinal} member!` : `Thank you for being part of ${serverName}!`;
-    ctx.fillText(subText, textX, 134);
+    const subText = isJoin ? `Welcome to ${serverName}` : `Departed from ${serverName}`;
+    ctx.fillText(subText, textX, isJoin ? 138 : 134);
 
     return canvas.toBuffer();
   }
@@ -1283,19 +1298,19 @@ class UtilityModule {
 
     // Discover server navigation channels dynamically
     const chanList = guild?.channels?.cache ? Array.from(guild.channels.cache.values()).filter(Boolean) : [];
-    const rolesChan = chanList.find(c => c.name && (c.name.includes('role') || c.name.includes('verify'))) || null;
+    const rolesChan = chanList.find(c => c.name && (c.name.includes('get-roles') || c.name.includes('role') || c.name.includes('verify'))) || null;
     const rulesChan = chanList.find(c => c.name && (c.name.includes('rule') || c.name.includes('guideline'))) || null;
     const chatChan = chanList.find(c => c.name && (c.name.includes('general') || c.name.includes('chat') || c.name.includes('lounge') || c.name.includes('discussion'))) || null;
 
     const navLines = [];
-    if (rolesChan) navLines.push(`🛡️ **Self-Assign Roles** ➔ <#${rolesChan.id}>`);
-    if (rulesChan) navLines.push(`📜 **Server Guidelines** ➔ <#${rulesChan.id}>`);
-    if (chatChan) navLines.push(`💬 **Introduce Yourself** ➔ <#${chatChan.id}>`);
+    if (rolesChan) navLines.push(`▸ 🎭 **Select Roles** ➔ <#${rolesChan.id}>`);
+    if (rulesChan) navLines.push(`▸ 📜 **Server Rules** ➔ <#${rulesChan.id}>`);
+    if (chatChan) navLines.push(`▸ 💬 **Community Lounge** ➔ <#${chatChan.id}>`);
 
-    const navSection = navLines.length > 0 ? `\n\n${navLines.join('\n')}` : '';
+    const navSection = navLines.length > 0 ? `\n\n### ⚡ Quick Navigation\n${navLines.join('\n')}` : '';
 
     const createdTs = member.user?.createdTimestamp ? Math.floor(member.user.createdTimestamp / 1000) : null;
-    const accountAgeText = createdTs ? `<t:${createdTs}:R>` : 'Unknown';
+    const accountAgeText = createdTs ? `<t:${createdTs}:R>` : 'Recent';
 
     let desc = '';
     if (isJoin) {
@@ -1306,8 +1321,8 @@ class UtilityModule {
           .replace(/#\{membercount\}/gi, `#${memberNum}`)
           .replace(/\{membercount\}/gi, `${ordinal}`);
       } else {
-        desc = `Hey <@${member.id}>, welcome to **${serverName}**! 🎉 We're thrilled to have you here in our creative community.${navSection}\n\n` +
-          `👤 **Member Position:** \`#${memberNum}\`　•　📅 **Account Created:** ${accountAgeText}`;
+        desc = `Welcome to **${serverName}** — the premier community for video editors, VFX artists, and creative minds.${navSection}\n\n` +
+          `> 👤 **Member Position:** \`#${memberNum}\`　•　📅 **Account Created:** ${accountAgeText}`;
       }
     } else {
       if (config.leaveMessage && config.leaveMessage.trim()) {
@@ -1317,8 +1332,8 @@ class UtilityModule {
           .replace(/#\{membercount\}/gi, `#${memberNum}`)
           .replace(/\{membercount\}/gi, `${ordinal}`);
       } else {
-        desc = `**${username}** has departed from **${serverName}**. We wish them the best!\n\n` +
-          `👥 **Total Members Remaining:** \`#${memberNum}\``;
+        desc = `**${username}** has departed from **${serverName}**.\n\n` +
+          `> 👥 **Remaining Members:** \`#${memberNum}\``;
       }
     }
 
@@ -1332,7 +1347,7 @@ class UtilityModule {
       .setDescription(desc)
       .setImage(`attachment://${isJoin ? 'welcome' : 'leave'}.png`)
       .setFooter({
-        text: `${serverName} • Official Welcomer`,
+        text: `${serverName} • Member #${memberNum}`,
         iconURL: serverIcon || undefined
       })
       .setTimestamp();
