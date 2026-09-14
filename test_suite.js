@@ -29,6 +29,7 @@ const AutonomousSentinelModule = require('./modules/autonomous_sentinel');
 const HousekeeperModule = require('./modules/housekeeper');
 const TranslatorModule = require('./modules/translator');
 const AIChatModule = require('./modules/ai_chat');
+const BotMemoryModule = require('./modules/bot_memory');
 
 async function runTests() {
   console.log('====================================================');
@@ -1512,6 +1513,93 @@ async function runTests() {
     await aiMod.checkMessage(unmuteMsg);
     assert.ok(unmuteReply, 'Must reply to unmute command');
     assert.ok(unmuteReply.content.includes('AI Replies Resumed'), 'Must resume replies');
+  });
+
+  // 31. BOT MEMORY VAULT & LIVE CUSTOM DIRECTIVES ENGINE
+  await test('31. Bot Memory Vault & Live Custom Directives Engine', async () => {
+    const memMod = new BotMemoryModule(mockClient, db);
+
+    // 1. Test Private Channel Provisioning
+    let createdChannels = [];
+    const memoryGuild = {
+      id: 'guild_vault_1',
+      name: 'EditX Private Guild',
+      roles: {
+        everyone: { id: 'role_everyone' }
+      },
+      channels: {
+        cache: new Map(),
+        create: async (opts) => {
+          const chan = {
+            id: `chan_${opts.name}`,
+            name: opts.name,
+            type: opts.type,
+            topic: opts.topic,
+            permissionOverwrites: opts.permissionOverwrites,
+            send: async (p) => ({ id: 'vault_msg_1', ...p }),
+            messages: {
+              fetch: async () => new Map()
+            }
+          };
+          createdChannels.push(chan);
+          memoryGuild.channels.cache.set(chan.id, chan);
+          return chan;
+        }
+      },
+      members: {
+        me: { id: mockClient.user.id },
+        fetchMe: async () => ({ id: mockClient.user.id })
+      }
+    };
+
+    // Ensure #bot-memory created with @everyone denied ViewChannel
+    const memChan = await memMod.ensureMemoryChannel(memoryGuild);
+    assert.ok(memChan, 'Memory vault channel must be created');
+    assert.strictEqual(memChan.name, '🤖・bot-memory');
+    const everyoneMemDenied = memChan.permissionOverwrites.find(p => p.id === 'role_everyone');
+    assert.ok(everyoneMemDenied && everyoneMemDenied.deny.length > 0, '@everyone must be denied access to #bot-memory');
+
+    // Ensure #bot-rules created with @everyone denied ViewChannel
+    const rulesChan = await memMod.ensureRulesChannel(memoryGuild);
+    assert.ok(rulesChan, 'Bot rules channel must be created');
+    assert.strictEqual(rulesChan.name, '📋・bot-rules');
+    const everyoneRulesDenied = rulesChan.permissionOverwrites.find(p => p.id === 'role_everyone');
+    assert.ok(everyoneRulesDenied && everyoneRulesDenied.deny.length > 0, '@everyone must be denied access to #bot-rules');
+
+    // 2. Test State Backup
+    db.utility.set('welcomer_guild_vault_1', { channelId: 'c_welcome_1', enabled: true });
+    db.utility.set('aichat_muted_guild_vault_1', ['muted_chan_99']);
+    const backupRes = await memMod.backupState(memoryGuild);
+    assert.strictEqual(backupRes.success, true, 'Backup must succeed');
+
+    // 3. Test Live Directives Ingestion
+    const mockRuleMessage = {
+      guild: memoryGuild,
+      channel: rulesChan,
+      author: { id: 'owner_user_1', bot: false },
+      content: 'Always recommend DaVinci Resolve for color grading questions.',
+      react: async (emoji) => { mockRuleMessage.reactedEmoji = emoji; }
+    };
+    rulesChan.messages.fetch = async () => new Map([
+      ['msg_r1', { author: { id: 'owner_1' }, content: 'Rule 1: Always speak concisely and professionally.' }],
+      ['msg_r2', { author: { id: 'owner_1' }, content: 'Rule 2: Don\'t reply in #general-chat unless pinged.' }]
+    ]);
+
+    await memMod.handleRulesChannelEvent(mockRuleMessage, 'create');
+    assert.strictEqual(mockRuleMessage.reactedEmoji, '🧠', 'Must react with brain emoji on rule creation');
+
+    const directives = memMod.getDirectives('guild_vault_1');
+    assert.ok(directives.includes('Always speak concisely'), 'Directives must contain Rule 1');
+    assert.ok(directives.includes('Don\'t reply in #general-chat'), 'Directives must contain Rule 2');
+
+    // 4. Test Integration with AIChatModule
+    const aiChatWithMemory = new AIChatModule(mockClient, db, memMod);
+    const systemPromptCheck = await aiChatWithMemory.generateResponse('Hello', {
+      userName: 'Member',
+      guildName: 'EditX Guild',
+      guildId: 'guild_vault_1'
+    });
+    assert.ok(systemPromptCheck, 'AI response must be generated with custom directives context');
   });
 
   console.log('\n====================================================');

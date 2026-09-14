@@ -51,6 +51,7 @@ const VerificationModule = require('./modules/verification');
 const SocialAlertsModule = require('./modules/social_alerts');
 const AIChatModule = require('./modules/ai_chat');
 const MusicModule = require('./modules/music');
+const BotMemoryModule = require('./modules/bot_memory');
 
 // Persistent Database Collections
 const db = {
@@ -98,6 +99,7 @@ const client = new Client({
 client.inviteCache = new Map();
 
 // Initialize Modules
+const botMemory = new BotMemoryModule(client, db);
 const roles = new RolesModule(client, db);
 const leveling = new LevelingModule(client, db, roles);
 const quickSetup = new QuickSetupModule(client, db);
@@ -116,11 +118,12 @@ const giveaways = new GiveawaysModule(client, db);
 const starboard = new StarboardModule(client, db);
 const verification = new VerificationModule(client, db);
 const socialAlerts = new SocialAlertsModule(client, db);
-const aiChat = new AIChatModule(client, db);
+const aiChat = new AIChatModule(client, db, botMemory);
 const music = new MusicModule(client);
 
 // All active modules list
 const modules = [
+  botMemory,
   quickSetup,
   utility,
   tickets,
@@ -174,10 +177,11 @@ client.once(Events.ClientReady, async () => {
     console.error('[REGISTRY WARNING] Failed to sync global commands:', err.message);
   }
 
-  // Pre-fetch invites across guilds & auto-detect welcome channels
+  // Pre-fetch invites across guilds, auto-detect welcome channels & initialize memory/directives
   for (const guild of client.guilds.cache.values()) {
     await utility.handleGuildCreate(guild);
     await utility.autoDetectWelcomeChannel(guild);
+    await botMemory.initGuild(guild);
   }
   console.log(`[INVITES] Cached invite tracking for ${client.inviteCache.size} guild(s).`);
 
@@ -194,6 +198,7 @@ client.once(Events.ClientReady, async () => {
 client.on(Events.GuildCreate, async (guild) => {
   await utility.handleGuildCreate(guild);
   await utility.autoDetectWelcomeChannel(guild);
+  await botMemory.initGuild(guild);
 });
 
 // Member Lifecycle Events (Welcomer & Invite Tracking & Auto-Roles)
@@ -207,9 +212,25 @@ client.on(Events.GuildMemberRemove, async (member) => {
   await roles.handleMemberLeave(member);
 });
 
+// Directives Real-Time Sync on Rule Updates/Deletions
+client.on(Events.MessageUpdate, async (oldMsg, newMsg) => {
+  if (newMsg && newMsg.guild) {
+    await botMemory.handleRulesChannelEvent(newMsg, 'update');
+  }
+});
+
+client.on(Events.MessageDelete, async (message) => {
+  if (message && message.guild) {
+    await botMemory.handleRulesChannelEvent(message, 'delete');
+  }
+});
+
 // Essential Event Routing: Honeypot, Autonomous Sentinel, Staff Copilot, Bump Buddy, Showcase Auto-Threads, Sticky Tags, Hiring Guard & Auto Translator
 client.on(Events.MessageCreate, async (message) => {
   if (!message.guild) return;
+
+  // Real-time custom directives ingestion in #bot-rules
+  await botMemory.handleRulesChannelEvent(message, 'create');
 
   // 0. Track message for Ghost-Ping detection
   housekeeper.trackMessage(message);

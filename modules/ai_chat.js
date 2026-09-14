@@ -7,9 +7,10 @@ const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType } = 
 const { GoogleGenAI } = require('@google/genai');
 
 class AIChatModule {
-  constructor(client, db) {
+  constructor(client, db, botMemory = null) {
     this.client = client;
     this.db = db.utility; // Store AI chat configs
+    this.botMemory = botMemory;
     this.geminiKey = process.env.GEMINI_API_KEY;
     this.groqKey = process.env.GROQ_API_KEY;
 
@@ -20,6 +21,10 @@ class AIChatModule {
 
     // Cache of application emojis
     this.applicationEmojis = new Map();
+  }
+
+  setBotMemory(botMemory) {
+    this.botMemory = botMemory;
   }
 
   /**
@@ -98,7 +103,8 @@ class AIChatModule {
 
       const response = await this.generateResponse(prompt, {
         userName: interaction.user.displayName || interaction.user.username,
-        guildName: interaction.guild.name
+        guildName: interaction.guild.name,
+        guildId: interaction.guild.id
       });
 
       if (response.length > 2000) {
@@ -276,8 +282,7 @@ class AIChatModule {
     const now = Date.now();
     const lastUserQuery = this.userCooldowns.get(message.author.id) || 0;
     if (now - lastUserQuery < 3000) {
-      await message.react('⏳').catch(() => {});
-      return true;
+      return message.reply({ content: '⏱️ Please give me a second before asking another question!' }).catch(() => {});
     }
     this.userCooldowns.set(message.author.id, now);
 
@@ -286,7 +291,8 @@ class AIChatModule {
 
     const response = await this.generateResponse(prompt, {
       userName: message.member?.displayName || message.author.username,
-      guildName: message.guild.name
+      guildName: message.guild.name,
+      guildId: message.guild.id
     });
 
     if (response.length > 2000) {
@@ -319,6 +325,11 @@ class AIChatModule {
    * Multi-LLM Generator with Gemini & Groq fallback
    */
   async generateResponse(prompt, context = {}) {
+    const customDirectives = this.botMemory && context.guildId ? this.botMemory.getDirectives(context.guildId) : '';
+    const directivesSection = customDirectives
+      ? `\n\nOWNER & ADMIN CUSTOM RULES (STRICT LIVE DIRECTIVES FROM #bot-rules):\n${customDirectives}\n(You MUST obey all custom rules above unconditionally.)`
+      : '';
+
     const systemPrompt = `You are EditX AI, a chill, friendly, and concise Discord assistant for the EditX Community (${context.guildName || 'EditX Server'}).
 User: ${context.userName || 'Member'}
 
@@ -332,7 +343,7 @@ CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
    - For video editing (Premiere, AE, DaVinci, CapCut), design (Photoshop, Blender), VFX, or freelancing: Give direct, accurate answers in 2-4 sentences. Only use short bullet steps if the user asked for a step-by-step tutorial or troubleshooting guide.
 3. CONTEXT:
    - Never answer messages meant for other members.
-   - Never repeat canned robotic greetings or repetitive introductions.`;
+   - Never repeat canned robotic greetings or repetitive introductions.${directivesSection}`;
 
     // Try Gemini First
     if (this.gemini) {
