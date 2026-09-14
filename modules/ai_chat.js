@@ -133,15 +133,52 @@ class AIChatModule {
   async checkMessage(message) {
     if (message.author.bot || !message.guild) return false;
 
+    // 1. If message pings any other user (e.g. @Alter), they are addressing that user, NEVER the bot!
+    const mentionedOtherUsers = message.mentions.users.filter(u => u.id !== this.client.user.id).size > 0;
+    if (mentionedOtherUsers) {
+      return false;
+    }
+
+    // 2. If message has broad role pings (@everyone, @here, @Staff, etc.), ignore
+    if (message.mentions.everyone || message.mentions.roles.size > 0) {
+      return false;
+    }
+
     const guildId = message.guild.id;
     const cfg = this.db.get(`aichat_cfg_${guildId}`) || {};
     const isDedicatedChannel = cfg.chatChannelId && message.channel.id === cfg.chatChannelId;
 
-    const isMentioned = message.mentions.has(this.client.user) && !message.mentions.everyone && !message.reference;
-    const isReplyingToBot = message.reference && (await this.isReplyToBot(message));
+    const isMentioned = message.mentions.has(this.client.user);
+    const isReplyingToBot = Boolean(message.reference && (await this.isReplyToBot(message)));
 
     if (!isMentioned && !isReplyingToBot && !isDedicatedChannel) {
       return false;
+    }
+
+    // Clean prompt by removing bot mention
+    let prompt = message.content.replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '').trim();
+    // Strip all user, role, and channel mention syntax to check actual textual intent
+    const textWithoutMentions = prompt.replace(/<@!?[0-9]+>|<@&[0-9]+>|<#[0-9]+>/g, '').trim();
+
+    // If message was ONLY a direct ping to the bot with no question or text
+    if (isMentioned && textWithoutMentions.length === 0) {
+      const sparkle = this.getEmoji('sparkles', '✨');
+      return message.reply({
+        content: `👋 Hello <@${message.author.id}>! How can I help you today? Ask me any video editing, design, or server question using \`@EditX <your question>\` or \`/ask\`.`,
+        allowedMentions: { repliedUser: false }
+      }).catch(() => {});
+    }
+
+    // If there is no real text (just whitespace, symbols, or empty), do not respond
+    if (textWithoutMentions.length < 2 || !/[a-zA-Z0-9]/.test(textWithoutMentions)) {
+      return false;
+    }
+
+    // Quick courteous reaction for short acknowledgments ("thanks", "ok", "cool")
+    const lower = textWithoutMentions.toLowerCase();
+    if (/^(thanks|thank you|thx|ty|tyvm|appreciate it|ok|okay|cool|nice|np|got it)\b/i.test(lower)) {
+      await message.react('❤️').catch(() => {});
+      return true;
     }
 
     // Anti-spam cooldown (1 query per 3s per user)
@@ -152,15 +189,6 @@ class AIChatModule {
       return true;
     }
     this.userCooldowns.set(message.author.id, now);
-
-    // Clean prompt
-    let prompt = message.content.replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '').trim();
-    if (!prompt && isMentioned) {
-      const sparkle = this.getEmoji('sparkles', '✨');
-      return message.reply({ content: `👋 Hello <@${message.author.id}>! I am the **EditX AI Assistant** ${sparkle}\nAsk me anything using \`@EditX <question>\` or \`/ask <question>\`!` });
-    }
-
-    if (!prompt) return false;
 
     // Send typing indicator
     await message.channel.sendTyping().catch(() => {});
@@ -173,12 +201,12 @@ class AIChatModule {
     if (response.length > 2000) {
       const chunks = this.splitMessage(response, 1950);
       for (const chunk of chunks) {
-        await message.reply({ content: chunk }).catch(err => {
+        await message.reply({ content: chunk, allowedMentions: { repliedUser: false } }).catch(err => {
           message.channel.send({ content: chunk }).catch(() => {});
         });
       }
     } else {
-      await message.reply({ content: response }).catch(err => {
+      await message.reply({ content: response, allowedMentions: { repliedUser: false } }).catch(err => {
         message.channel.send({ content: response }).catch(() => {});
       });
     }
@@ -203,11 +231,12 @@ class AIChatModule {
     const systemPrompt = `You are EditX AI, the official Discord intelligent assistant for the EditX Community (${context.guildName || 'EditX Server'}).
 User: ${context.userName || 'Member'}
 
-Guidelines:
+CRITICAL GUIDELINES:
 1. Tone: Friendly, concise, professional, creative, and Discord-native.
-2. Expertise: Video editing (Premiere Pro, After Effects, DaVinci Resolve, CapCut), graphic design (Photoshop, Illustrator, Blender), motion graphics, VFX, freelancing, and Discord community features.
-3. Keep responses clean, well-formatted using markdown (bullet points, bold text, code blocks where appropriate).
-4. Do not make answers unnecessarily long. Be direct and helpful.`;
+2. If the user is just saying hello or greeting you ("hi", "hello", "hey", "what's up"), give a brief, friendly 1-2 sentence greeting. NEVER dump a massive list of features, bullet points, or unsolicited essays.
+3. Expertise: Video editing (Premiere Pro, After Effects, DaVinci Resolve, CapCut), graphic design (Photoshop, Illustrator, Blender), motion graphics, VFX, freelancing, and Discord community features.
+4. Keep responses clean, well-formatted using markdown. Be direct and concise. Short bullets only when the user explicitly asks for steps or recommendations.
+5. Do not answer messages meant for other people or repeat robotic canned introductions.`;
 
     // Try Gemini First
     if (this.gemini) {
