@@ -39,7 +39,6 @@ const DecorationModule = require('./modules/decoration');
 const RolesModule = require('./modules/roles');
 const LoggingModule = require('./modules/logging');
 const AIModerationModule = require('./modules/ai_moderator');
-const AIChatModule = require('./modules/ai_chat');
 const TagsModule = require('./modules/tags');
 const HiringModule = require('./modules/hiring');
 
@@ -96,7 +95,6 @@ const decoration = new DecorationModule(client, db);
 const roles = new RolesModule(client, db);
 const logging = new LoggingModule(client, db);
 const aiModerator = new AIModerationModule(client, db);
-const aiChat = new AIChatModule(client, db);
 const tags = new TagsModule(client, db);
 const hiring = new HiringModule(client, db);
 
@@ -110,7 +108,6 @@ const modules = [
   roles,
   logging,
   aiModerator,
-  aiChat,
   tags,
   hiring
 ];
@@ -153,7 +150,12 @@ client.once(Events.ClientReady, async () => {
   console.log(`[INVITES] Cached invite tracking for ${client.inviteCache.size} guild(s).`);
 
   // Pre-fetch & cache Application Emojis from Developer Portal
-  await aiChat.cacheApplicationEmojis();
+  try {
+    if (client.application) {
+      const appEmojis = await client.application.emojis.fetch();
+      console.log(`[APPLICATION EMOJIS] Successfully cached ${appEmojis.size} application emojis.`);
+    }
+  } catch (e) {}
 });
 
 // Member Lifecycle Events (Welcomer & Invite Tracking & Auto-Roles)
@@ -167,7 +169,7 @@ client.on(Events.GuildMemberRemove, async (member) => {
   await roles.handleMemberLeave(member);
 });
 
-// Essential Event Routing: Honeypot, AI Mod Sentinel, AI Assistant, Bump Buddy, Sticky Tags & Hiring Guard
+// Essential Event Routing: Honeypot, AI Mod Sentinel, Bump Buddy, Sticky Tags & Hiring Guard
 client.on(Events.MessageCreate, async (message) => {
   if (!message.guild) return;
 
@@ -178,17 +180,13 @@ client.on(Events.MessageCreate, async (message) => {
   // 2. AI Moderation Copilot: Scans suspicious content and reports to mods in report-only mode
   await aiModerator.checkMessage(message);
 
-  // 3. AI Conversational Assistant: Replies to @EditX mentions or dedicated AI channels
-  const handledByAI = await aiChat.checkMessage(message);
-  if (handledByAI) return;
-
-  // 4. Bump Buddy: Inspects Disboard / Bump Buddy confirmations
+  // 3. Bump Buddy: Inspects Disboard / Bump Buddy confirmations
   utility.checkBump(message);
 
-  // 5. Tags, AFK, Auto-Responders & Persistent Sticky Message Reposting
+  // 4. Tags, AFK, Auto-Responders & Persistent Sticky Message Reposting
   await tags.checkMessage(message);
 
-  // 6. Hiring Channel Guard: Cleans off-topic chatter and routes through 1-click modal forms
+  // 5. Hiring Channel Guard: Cleans off-topic chatter and routes through 1-click modal forms
   await hiring.checkMessage(message);
 });
 
