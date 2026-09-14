@@ -178,13 +178,13 @@ client.once(Events.ClientReady, async () => {
     console.error('[REGISTRY WARNING] Failed to sync global commands:', err.message);
   }
 
-  // Pre-fetch invites across guilds, auto-detect welcome channels & initialize memory/directives
+  // Run Autonomous Auto-Pilot across all connected servers (zero manual setup required)
   for (const guild of client.guilds.cache.values()) {
+    await quickSetup.runAutoPilot(guild);
     await utility.handleGuildCreate(guild);
-    await utility.autoDetectWelcomeChannel(guild);
     await botMemory.initGuild(guild);
   }
-  console.log(`[INVITES] Cached invite tracking for ${client.inviteCache.size} guild(s).`);
+  console.log(`[AUTOPILOT] 100% Autonomous server operations online for ${client.guilds.cache.size} guild(s).`);
 
   // Pre-fetch & cache Application Emojis from Developer Portal
   try {
@@ -197,8 +197,8 @@ client.once(Events.ClientReady, async () => {
 
 // Guild Join Event
 client.on(Events.GuildCreate, async (guild) => {
+  await quickSetup.runAutoPilot(guild);
   await utility.handleGuildCreate(guild);
-  await utility.autoDetectWelcomeChannel(guild);
   await botMemory.initGuild(guild);
 });
 

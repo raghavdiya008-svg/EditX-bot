@@ -192,22 +192,39 @@ class AIChatModule {
 
     const isMentioned = message.mentions.has(this.client.user);
     const isReplyingToBot = Boolean(message.reference && (await this.isReplyToBot(message)));
-
-    if (!isMentioned && !isReplyingToBot && !isDedicatedChannel) {
-      return false;
-    }
-
-    // Clean prompt by removing bot mention
-    let prompt = message.content.replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '').trim();
-    // Strip all user, role, and channel mention syntax to check actual textual intent
-    const textWithoutMentions = prompt.replace(/<@!?[0-9]+>|<@&[0-9]+>|<#[0-9]+>/g, '').trim();
-    const lower = textWithoutMentions.toLowerCase();
+    const startsWithBotName = /^(\b(hey\s+|yo\s+)?editx\b|\bbot\b[,:]?\s+)/i.test(message.content);
 
     // Check if channel or server is currently muted for AI chat
     const mutedKey = `aichat_muted_${guildId}`;
     let mutedChannels = this.db.get(mutedKey) || [];
     const isChannelMuted = mutedChannels.includes(message.channel.id);
     const isServerMuted = Boolean(this.db.get(`aichat_muted_server_${guildId}`));
+
+    if (!isMentioned && !isReplyingToBot && !isDedicatedChannel && !startsWithBotName) {
+      if (!isServerMuted && !isChannelMuted) {
+        const rawContent = (message.content || '').toLowerCase();
+        const faqReply = this.checkCommunityFAQ(message, rawContent);
+        if (faqReply) {
+          if (!this.faqCooldowns) this.faqCooldowns = new Map();
+          const now = Date.now();
+          const lastFaq = this.faqCooldowns.get(message.channel.id) || 0;
+          if (now - lastFaq > 45000) {
+            this.faqCooldowns.set(message.channel.id, now);
+            await message.reply({ content: faqReply, allowedMentions: { repliedUser: false } }).catch(() => {});
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    // Clean prompt by removing bot mention or prefix
+    let prompt = message.content.replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '')
+      .replace(/^(\b(hey\s+|yo\s+)?editx\b|\bbot\b[,:]?\s+)/i, '')
+      .trim();
+    // Strip all user, role, and channel mention syntax to check actual textual intent
+    const textWithoutMentions = prompt.replace(/<@!?[0-9]+>|<@&[0-9]+>|<#[0-9]+>/g, '').trim();
+    const lower = textWithoutMentions.toLowerCase();
 
     // Permission helper: Allow staff, managers, administrators, and server owner
     const canManageAI = message.member?.permissions?.has(PermissionFlagsBits.ManageMessages) ||
@@ -513,6 +530,58 @@ CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
     }
     if (cur) chunks.push(cur.trim());
     return chunks.length ? chunks : [text];
+  }
+
+  /**
+   * Proactive Community FAQ Assistant
+   * Automatically answers repetitive community questions (roles, hiring, tickets, rules)
+   */
+  checkCommunityFAQ(message, lower) {
+    if (!message.guild) return null;
+    const guild = message.guild;
+    const chanList = guild.channels?.cache ? Array.from(guild.channels.cache.values()) : [];
+
+    // 1. Roles / Self-Roles
+    if (/(how\s+(to|do\s+i)|where\s+(can|do)\s+i)\s+(get|pick|claim|select|find)\s+(roles?|color|editor\s+role)/i.test(lower)) {
+      const roleChan = chanList.find(c =>
+        c && (c.name.includes('get-roles') || c.name.includes('roles') || c.name.includes('reaction-roles'))
+      );
+      if (roleChan) {
+        return `👋 Looking for roles? You can self-assign your creator specialties, software stack, and notification pings in <#${roleChan.id}>!`;
+      }
+    }
+
+    // 2. Hiring & Freelance Jobs
+    if (/(how\s+(to|do\s+i)|where\s+(can|do)\s+i)\s+(post|publish)\s+(a\s+)?(job|hiring|listing|services|freelance|portfolio)/i.test(lower)) {
+      const hiringId = this.db.get(`hiring_chan_${guild.id}`);
+      const forHireId = this.db.get(`forhire_chan_${guild.id}`);
+      const hiringChan = (hiringId ? chanList.find(c => c.id === hiringId) : null) || chanList.find(c => c.name.includes('hiring'));
+      const forHireChan = (forHireId ? chanList.find(c => c.id === forHireId) : null) || chanList.find(c => c.name.includes('for-hire') || c.name.includes('freelance'));
+
+      return `💼 **Recruitment Hub**: You can use \`/post hiring\` to post a job in ${hiringChan ? `<#${hiringChan.id}>` : '`#hiring`'}, or \`/post hireable\` to showcase your freelance services in ${forHireChan ? `<#${forHireChan.id}>` : '`#for-hire`'}! Both automatically create dedicated discussion threads.`;
+    }
+
+    // 3. Support Tickets
+    if (/(how\s+(to|do\s+i)|where\s+(can|do)\s+i)\s+(open|create|start)\s+(a\s+)?(ticket|support)/i.test(lower)) {
+      const ticketChan = chanList.find(c =>
+        c && (c.name.includes('ticket') || c.name.includes('support'))
+      );
+      if (ticketChan) {
+        return `🎫 Need help from staff? You can open a private support ticket in <#${ticketChan.id}>!`;
+      }
+    }
+
+    // 4. Server Rules
+    if (/(where\s+are|what\s+are)\s+(the\s+)?(server\s+)?(rules|guidelines)/i.test(lower)) {
+      const rulesChan = chanList.find(c =>
+        c && (c.name === 'rules' || c.name.includes('server-rules') || c.name.includes('guidelines'))
+      );
+      if (rulesChan) {
+        return `📜 You can read our official server rules and guidelines in <#${rulesChan.id}>!`;
+      }
+    }
+
+    return null;
   }
 }
 

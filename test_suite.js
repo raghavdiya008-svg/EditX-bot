@@ -1934,6 +1934,86 @@ async function runTests() {
     assert.ok(crossChanThreadCreated, 'Thread must be created under the post in #hiring');
   });
 
+  // 34. AUTONOMOUS SERVER ENGINE - 100% AUTO-PILOT & PROACTIVE FAQ COPILOT
+  await test('Autonomous Engine - runAutoPilot, /autopilot, auto-role discovery & proactive community FAQs', async () => {
+    const quick = new QuickSetupModule(mockClient, db);
+    const rolesMod = new RolesModule(mockClient, db);
+    const aiMod = new AIChatModule(mockClient, db);
+
+    // 1. Verify /autopilot command registration
+    const quickCmds = quick.getCommands();
+    assert.ok(quickCmds.some(c => c.name === 'autopilot'), 'Must register /autopilot command');
+
+    // 2. Test runAutoPilot auto-discovery
+    const pilotGuild = {
+      ...mockGuild,
+      id: 'pilot_guild_888',
+      channels: {
+        cache: new Map([
+          ['c_w', { id: 'c_w', name: 'welcome-hub', type: ChannelType.GuildText }],
+          ['c_h', { id: 'c_h', name: '💼-hiring', type: ChannelType.GuildText }],
+          ['c_f', { id: 'c_f', name: '🎨-for-hire', type: ChannelType.GuildText }],
+          ['c_t', { id: 'c_t', name: 'ticket-support', type: ChannelType.GuildText }],
+          ['c_l', { id: 'c_l', name: 'audit-log', type: ChannelType.GuildText }],
+          ['c_r', { id: 'c_r', name: 'get-roles', type: ChannelType.GuildText }]
+        ])
+      },
+      roles: {
+        cache: new Map([
+          ['r_mem', { id: 'r_mem', name: 'Members' }]
+        ])
+      }
+    };
+
+    const pilotResults = await quick.runAutoPilot(pilotGuild);
+    assert.ok(pilotResults.welcomer.includes('c_w'), 'Auto-pilot must link welcomer');
+    assert.ok(pilotResults.autorole.includes('r_mem'), 'Auto-pilot must link member autorole');
+    assert.ok(pilotResults.logging.includes('c_l'), 'Auto-pilot must link mod logging');
+    assert.ok(pilotResults.hiring.includes('c_h'), 'Auto-pilot must link hiring');
+
+    // 3. Test /autopilot command execution
+    let pilotEmbed = null;
+    const mockPilotInteraction = {
+      commandName: 'autopilot',
+      member: { permissions: { has: () => true } },
+      guild: pilotGuild,
+      deferReply: async () => {},
+      editReply: async (payload) => { pilotEmbed = payload.embeds[0]; }
+    };
+    await quick.handleCommand(mockPilotInteraction);
+    assert.ok(pilotEmbed, 'Must reply with Auto-Pilot status embed');
+    assert.ok(pilotEmbed.data.title.includes('Autonomous Auto-Pilot Online'));
+
+    // 4. Test Auto-Role on Member Join (Auto-detects @Members when no config was set)
+    let assignedRole = null;
+    const newMember = {
+      id: 'new_join_1',
+      guild: pilotGuild,
+      roles: {
+        cache: new Map(),
+        add: async (roleId) => { assignedRole = roleId; }
+      }
+    };
+    db.config.delete(pilotGuild.id); // clear any pre-set config
+    await rolesMod.handleMemberJoin(newMember);
+    assert.strictEqual(assignedRole, 'r_mem', 'Must auto-detect and assign @Members role on join');
+
+    // 5. Test Proactive Community FAQs (Zero-effort answering)
+    const faqRolesMsg = {
+      guild: pilotGuild,
+      content: 'how do i get roles in this server?'
+    };
+    const rolesFaqReply = aiMod.checkCommunityFAQ(faqRolesMsg, faqRolesMsg.content.toLowerCase());
+    assert.ok(rolesFaqReply && (rolesFaqReply.includes('get-roles') || rolesFaqReply.includes('c_r')), 'Must point user to #get-roles');
+
+    const faqHiringMsg = {
+      guild: pilotGuild,
+      content: 'how to post a job or hire someone?'
+    };
+    const hiringFaqReply = aiMod.checkCommunityFAQ(faqHiringMsg, faqHiringMsg.content.toLowerCase());
+    assert.ok(hiringFaqReply && hiringFaqReply.includes('/post hiring'), 'Must explain /post hiring');
+  });
+
   console.log('\n====================================================');
   console.log(`🏁 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('====================================================\n');

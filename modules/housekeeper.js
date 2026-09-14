@@ -168,7 +168,7 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
           method: 'POST',
           headers: { 'Authorization': `Bearer ${this.groqKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'groq/compound',
+            model: 'qwen/qwen3.8-27b',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: cleanPrompt }]
           })
         });

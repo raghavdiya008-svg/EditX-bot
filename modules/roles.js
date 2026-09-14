@@ -423,11 +423,26 @@ class RolesModule {
   }
 
   async handleMemberJoin(member) {
+    if (!member || !member.guild) return;
     const guildConfig = this.db.get(member.guild.id) || {};
 
-    // 1. Auto-Role
-    if (guildConfig.autoRoleId) {
-      member.roles.add(guildConfig.autoRoleId).catch(() => {});
+    // 1. Auto-Role (configured or auto-detected default member role)
+    let roleId = guildConfig.autoRoleId;
+    if (!roleId && member.guild.roles?.cache) {
+      const roleList = Array.from(member.guild.roles.cache.values());
+      const defaultRole = roleList.find(r =>
+        ['member', 'members', 'community', 'verified', 'editor'].some(n => (r.name || '').toLowerCase() === n)
+      );
+      if (defaultRole) {
+        roleId = defaultRole.id;
+        guildConfig.autoRoleId = roleId;
+        this.db.set(member.guild.id, guildConfig);
+        console.log(`[AUTOROLE] Auto-detected and linked member role: @${defaultRole.name} (${defaultRole.id})`);
+      }
+    }
+
+    if (roleId) {
+      member.roles.add(roleId).catch(() => {});
     }
 
     // 2. Sticky Roles Restore
