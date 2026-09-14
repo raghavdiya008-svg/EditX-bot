@@ -73,7 +73,7 @@ class AIChatModule {
             .addChannelOption(o => o.setName('target').setDescription('Target text channel').addChannelTypes(ChannelType.GuildText).setRequired(true))
         )
         .addSubcommand(s =>
-          s.setName('disable-channel')
+          s.setName('disable')
             .setDescription('Disable the dedicated AI chat channel')
         )
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
@@ -116,7 +116,7 @@ class AIChatModule {
         return interaction.reply({ content: `✅ Dedicated AI chat channel set to <#${chan.id}>. Members can chat freely here without pinging!`, ephemeral: true });
       }
 
-      if (sub === 'disable-channel') {
+      if (sub === 'disable') {
         const cfg = this.db.get(key) || {};
         cfg.chatChannelId = null;
         this.db.set(key, cfg);

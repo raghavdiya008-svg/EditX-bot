@@ -28,6 +28,7 @@ const HiringModule = require('./modules/hiring');
 const AutonomousSentinelModule = require('./modules/autonomous_sentinel');
 const HousekeeperModule = require('./modules/housekeeper');
 const TranslatorModule = require('./modules/translator');
+const AIChatModule = require('./modules/ai_chat');
 
 async function runTests() {
   console.log('====================================================');
@@ -928,7 +929,8 @@ async function runTests() {
       new DecorationModule(mockClient, db),
       new HiringModule(mockClient, db),
       new HousekeeperModule(mockClient, db),
-      new TranslatorModule(mockClient, db)
+      new TranslatorModule(mockClient, db),
+      new AIChatModule(mockClient, db)
     ];
 
     const allSlashCommands = modules.flatMap(m => m.getCommands());
@@ -1304,6 +1306,128 @@ async function runTests() {
       reply: async (payload) => { configReply = payload; }
     });
     assert.ok(configReply.embeds[0].data.title.includes('Auto English Translation Settings'));
+  });
+
+  // 29. GIVEAWAYS LIFECYCLE & BUTTONS
+  await test('29. Giveaways - Creation, Entry Toggling, Winner Picking & Reroll', async () => {
+    const gwMod = new GiveawaysModule(mockClient, db);
+
+    // 1. Create giveaway via slash command
+    let gwReply = null;
+    const mockGwInteraction = {
+      commandName: 'giveaway',
+      options: {
+        getSubcommand: () => 'start',
+        getString: (name) => name === 'prize' ? '1 Month Premiere Pro VIP Subscription' : null,
+        getInteger: (name) => name === 'minutes' ? 60 : name === 'winners' ? 2 : null
+      },
+      channel: { id: 'giveaway_chan_1' },
+      guild: mockGuild,
+      user: mockUser,
+      reply: async (payload) => {
+        gwReply = payload;
+        return { id: 'gw_msg_101', ...payload };
+      }
+    };
+
+    await gwMod.handleCommand(mockGwInteraction);
+    assert.ok(gwReply, 'Giveaway embed must be returned');
+    assert.strictEqual(gwReply.embeds[0].data.title, '🎉 GIVEAWAY 🎉');
+    
+    const gwData = db.giveaways.get('gw_gw_msg_101');
+    assert.ok(gwData, 'Giveaway must be stored in database');
+    assert.strictEqual(gwData.prize, '1 Month Premiere Pro VIP Subscription');
+    assert.strictEqual(gwData.winnersCount, 2);
+
+    // 2. User enters giveaway via button
+    let buttonReply = null;
+    const mockEnterInteraction = {
+      isButton: () => true,
+      customId: 'gw_enter',
+      message: { id: 'gw_msg_101', edit: async () => {} },
+      user: { id: 'entrant_1' },
+      reply: async (payload) => { buttonReply = payload; }
+    };
+
+    await gwMod.handleInteraction(mockEnterInteraction);
+    assert.ok(buttonReply.content.includes('successfully entered'));
+    assert.ok(db.giveaways.get('gw_gw_msg_101').entrants.includes('entrant_1'));
+
+    // 3. User clicks again -> leaves giveaway
+    await gwMod.handleInteraction(mockEnterInteraction);
+    assert.ok(buttonReply.content.includes('left the giveaway'));
+    assert.strictEqual(db.giveaways.get('gw_gw_msg_101').entrants.includes('entrant_1'), false);
+
+    // 4. Winner picking helper
+    const testEntrants = ['u1', 'u2', 'u3', 'u4', 'u5'];
+    const winners = gwMod.pickWinners(testEntrants, 2);
+    assert.strictEqual(winners.length, 2);
+    assert.ok(testEntrants.includes(winners[0]));
+    assert.ok(testEntrants.includes(winners[1]));
+  });
+
+  // 30. VERIFICATION GATE & AI ASSISTANT
+  await test('30. Verification Gate & AI Assistant Engine', async () => {
+    const verMod = new VerificationModule(mockClient, db);
+    const aiMod = new AIChatModule(mockClient, db);
+
+    // 1. Test /verify setup
+    let verDeployReply = null;
+    let panelSent = null;
+    const targetChan = {
+      id: 'verify_chan_1',
+      send: async (payload) => { panelSent = payload; return { id: 'panel_msg_1' }; }
+    };
+
+    const mockVerifyInteraction = {
+      commandName: 'verify',
+      options: {
+        getSubcommand: () => 'setup',
+        getRole: () => ({ id: 'role_verified_member', name: 'Verified Editor' }),
+        getChannel: () => targetChan,
+        getString: (n) => n === 'title' ? 'Member Security Gate' : null
+      },
+      channel: targetChan,
+      guild: mockGuild,
+      reply: async (payload) => { verDeployReply = payload; }
+    };
+
+    await verMod.handleCommand(mockVerifyInteraction);
+    assert.ok(verDeployReply.content.includes('successfully deployed'));
+    assert.ok(panelSent);
+    assert.ok(panelSent.components[0].components[0].data.custom_id.includes('verify_btn_role_verified_member'));
+
+    // 2. Test Verification Button Click
+    const verifiedRoles = new Set();
+    const mockVerifyingMember = {
+      id: 'new_joiner_1',
+      roles: {
+        cache: { has: (rid) => verifiedRoles.has(rid) },
+        add: async (r) => { verifiedRoles.add(r.id); }
+      }
+    };
+    mockGuild.roles.cache.set('role_verified_member', { id: 'role_verified_member', name: 'Verified Editor' });
+
+    let clickReply = null;
+    const mockBtnClick = {
+      isButton: () => true,
+      customId: 'verify_btn_role_verified_member',
+      guild: mockGuild,
+      member: mockVerifyingMember,
+      reply: async (payload) => { clickReply = payload; }
+    };
+
+    await verMod.handleInteraction(mockBtnClick);
+    assert.ok(clickReply.content.includes('Verification Complete'));
+    assert.ok(verifiedRoles.has('role_verified_member'));
+
+    // 3. Test AI Chat splitMessage
+    const longText = 'Line 1\nLine 2\nLine 3\n'.repeat(50);
+    const chunks = aiMod.splitMessage(longText, 500);
+    assert.ok(chunks.length > 1);
+    for (const c of chunks) {
+      assert.ok(c.length <= 500);
+    }
   });
 
   console.log('\n====================================================');

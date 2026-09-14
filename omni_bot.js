@@ -44,6 +44,13 @@ const HousekeeperModule = require('./modules/housekeeper');
 const TagsModule = require('./modules/tags');
 const HiringModule = require('./modules/hiring');
 const TranslatorModule = require('./modules/translator');
+const LevelingModule = require('./modules/leveling');
+const GiveawaysModule = require('./modules/giveaways');
+const StarboardModule = require('./modules/starboard');
+const VerificationModule = require('./modules/verification');
+const SocialAlertsModule = require('./modules/social_alerts');
+const AIChatModule = require('./modules/ai_chat');
+const MusicModule = require('./modules/music');
 
 // Persistent Database Collections
 const db = {
@@ -59,7 +66,8 @@ const db = {
   starboard: new JSONDatabase('starboard'),
   tags: new JSONDatabase('tags'),
   verification: new JSONDatabase('verification'),
-  social: new JSONDatabase('social')
+  social: new JSONDatabase('social'),
+  hiring: new JSONDatabase('hiring')
 };
 
 const TOKEN = process.env.DISCORD_TOKEN || process.env.DISCORD_BOT_TOKEN;
@@ -89,13 +97,14 @@ const client = new Client({
 // Invite cache for tracking
 client.inviteCache = new Map();
 
-// Initialize Essential Focused Modules
+// Initialize Modules
+const roles = new RolesModule(client, db);
+const leveling = new LevelingModule(client, db, roles);
 const quickSetup = new QuickSetupModule(client, db);
 const utility = new UtilityModule(client, db);
 const tickets = new TicketsModule(client, db);
 const moderation = new ModerationModule(client, db);
 const decoration = new DecorationModule(client, db);
-const roles = new RolesModule(client, db);
 const logging = new LoggingModule(client, db);
 const aiModerator = new AIModerationModule(client, db);
 const sentinel = new AutonomousSentinelModule(client, db);
@@ -103,6 +112,12 @@ const housekeeper = new HousekeeperModule(client, db, sentinel);
 const tags = new TagsModule(client, db);
 const hiring = new HiringModule(client, db);
 const translator = new TranslatorModule(client, db);
+const giveaways = new GiveawaysModule(client, db);
+const starboard = new StarboardModule(client, db);
+const verification = new VerificationModule(client, db);
+const socialAlerts = new SocialAlertsModule(client, db);
+const aiChat = new AIChatModule(client, db);
+const music = new MusicModule(client);
 
 // All active modules list
 const modules = [
@@ -118,7 +133,14 @@ const modules = [
   housekeeper,
   tags,
   hiring,
-  translator
+  translator,
+  leveling,
+  giveaways,
+  starboard,
+  verification,
+  socialAlerts,
+  aiChat,
+  music
 ];
 
 client.once(Events.ClientReady, async () => {
@@ -226,11 +248,23 @@ client.on(Events.MessageCreate, async (message) => {
 
   // 9. Auto English Translator: Detects foreign language messages and replies with instant English translation
   await translator.checkMessage(message);
+
+  // 10. AI Chat: Answers when pinged or in dedicated AI chat channels
+  await aiChat.checkMessage(message);
+
+  // 11. Experience & Leveling Progress
+  leveling.handleChatXP(message);
 });
 
-// Ghost-Ping Detection on Message Deletion
+// Message Deletion Handlers (Ghost-Ping Catcher + Audit Logger)
 client.on(Events.MessageDelete, async (message) => {
   await housekeeper.handleMessageDelete(message);
+  await logging.handleMessageDelete(message);
+});
+
+// Message Update Handlers (Audit Logger)
+client.on(Events.MessageUpdate, async (oldMsg, newMsg) => {
+  await logging.handleMessageUpdate(oldMsg, newMsg);
 });
 
 // Unified Interaction Router (Commands, Buttons, Menus, Modals)
@@ -242,23 +276,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  // Component & Modal Interactions (Buttons / Menus / Modals)
+  // Dynamic Component & Modal Interaction Dispatcher
   if (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) {
-    const handledByHiring = await hiring.handleInteraction(interaction);
-    if (handledByHiring) return;
-
-    const handledByAI = await aiModerator.handleInteraction(interaction);
-    if (handledByAI) return;
-
-    const handledByRoles = await roles.handleInteraction(interaction);
-    if (handledByRoles) return;
-
-    const handledByTickets = await tickets.handleInteraction(interaction);
-    if (handledByTickets) return;
-
-    const handledByUtility = await utility.handleInteraction(interaction);
-    if (handledByUtility) return;
-
+    for (const mod of modules) {
+      if (typeof mod.handleInteraction === 'function') {
+        try {
+          const handled = await mod.handleInteraction(interaction);
+          if (handled) return;
+        } catch (err) {
+          console.error(`[INTERACTION ERROR in ${mod.constructor.name}]`, err);
+        }
+      }
+    }
     return;
   }
 
@@ -287,10 +316,41 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// Honeypot Reaction Trap
-client.on(Events.MessageReactionAdd, (reaction, user) => {
+// Reaction Event Handlers (Honeypot + Starboard)
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
   moderation.checkHoneypotReaction(reaction, user);
+  for (const mod of modules) {
+    if (typeof mod.handleReactionAdd === 'function') {
+      try {
+        await mod.handleReactionAdd(reaction, user);
+      } catch (err) {
+        console.error(`[REACTION ADD ERROR in ${mod.constructor.name}]`, err);
+      }
+    }
+  }
 });
+
+client.on(Events.MessageReactionRemove, async (reaction, user) => {
+  for (const mod of modules) {
+    if (typeof mod.handleReactionRemove === 'function') {
+      try {
+        await mod.handleReactionRemove(reaction, user);
+      } catch (err) {
+        console.error(`[REACTION REMOVE ERROR in ${mod.constructor.name}]`, err);
+      }
+    }
+  }
+});
+
+// Logging Audit Listeners
+client.on(Events.GuildMemberUpdate, (oldM, newM) => logging.handleMemberUpdate(oldM, newM));
+client.on(Events.VoiceStateUpdate, (oldS, newS) => logging.handleVoiceStateUpdate(oldS, newS));
+client.on(Events.ChannelCreate, (c) => logging.handleChannelCreate(c));
+client.on(Events.ChannelDelete, (c) => logging.handleChannelDelete(c));
+client.on(Events.GuildRoleCreate, (r) => logging.handleRoleCreate(r));
+client.on(Events.GuildRoleDelete, (r) => logging.handleRoleDelete(r));
+client.on(Events.GuildBanAdd, (b) => logging.handleBanAdd(b));
+client.on(Events.GuildBanRemove, (b) => logging.handleBanRemove(b));
 
 // Anti-Nuke & Server Protection yielded exclusively to Wick Bot
 
