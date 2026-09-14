@@ -822,27 +822,38 @@ class UtilityModule {
         const member = interaction.member;
 
         try {
-          if (config.cardEnabled === true) {
-            const cardBuffer = await this.generateCard(member, config.theme || 'dark', type);
-            const fileName = type === 'join' ? 'welcome.png' : 'leave.png';
-            const attachment = new AttachmentBuilder(cardBuffer, { name: fileName });
-            const embed = this.buildWelcomerEmbed(member, config, type);
+          if (config.cardEnabled !== false) {
+            try {
+              const cardBuffer = await this.generateCard(member, config.theme || 'dark', type);
+              const fileName = type === 'join' ? 'welcome.png' : 'leave.png';
+              const attachment = new AttachmentBuilder(cardBuffer, { name: fileName });
+              const embed = this.buildWelcomerEmbed(member, config, type);
 
-            await interaction.editReply({
-              content: `<@${member.id}>`,
-              embeds: [embed],
-              files: [attachment]
-            });
+              await interaction.editReply({
+                content: `<@${member.id}>`,
+                embeds: [embed],
+                files: [attachment]
+              });
+              return true;
+            } catch (cardErr) {
+              const embed = this.buildWelcomerEmbed(member, config, type);
+              embed.setImage(null);
+              await interaction.editReply({
+                content: `<@${member.id}>`,
+                embeds: [embed]
+              });
+              return true;
+            }
           } else {
             const textMsg = this.buildWelcomerTextMessage(member, config, type);
             await interaction.editReply({
               content: textMsg
             });
+            return true;
           }
         } catch (err) {
           return interaction.editReply(`❌ Simulation error: ${err.message}`);
         }
-        return true;
       }
 
       if (sub === 'disable') {
@@ -1408,6 +1419,38 @@ class UtilityModule {
     }
   }
 
+  async autoDetectWelcomeChannel(guild) {
+    if (!guild) return null;
+    const wKey = `welcomer_${guild.id}`;
+    let config = this.utilDb.get(wKey) || { theme: 'dark', cardEnabled: true, enabled: true };
+    if (!config.channelId) {
+      let chanList = guild.channels?.cache ? Array.from(guild.channels.cache.values()) : [];
+      if (!chanList.length && guild.channels?.fetch) {
+        const fetched = await guild.channels.fetch().catch(() => null);
+        if (fetched) chanList = Array.from(fetched.values());
+      }
+      chanList = chanList.filter(Boolean);
+
+      const found = chanList.find(c =>
+        c && c.type === ChannelType.GuildText && (
+          /welcome[-_]?hub/i.test(c.name) ||
+          /welcome/i.test(c.name) ||
+          /arrival/i.test(c.name) ||
+          /joins/i.test(c.name)
+        )
+      ) || guild.systemChannel;
+
+      if (found) {
+        config.channelId = found.id;
+        config.enabled = true;
+        this.utilDb.set(wKey, config);
+        console.log(`[WELCOMER] Auto-configured welcome channel #${found.name} (${found.id}) for guild: ${guild.name}`);
+        return found;
+      }
+    }
+    return null;
+  }
+
   async handleJoin(member) {
     let inviterId = null;
     let isFake = false;
@@ -1489,7 +1532,7 @@ class UtilityModule {
     }
 
     // --- 2. WELCOMER CUSTOM DM DISPATCH ---
-    const welcomerConfig = this.utilDb.get(`welcomer_${member.guild.id}`) || {};
+    let welcomerConfig = this.utilDb.get(`welcomer_${member.guild.id}`) || {};
     if (welcomerConfig.dmEnabled) {
       const defaultDm = `Welcome to **${member.guild.name}**, <@${member.id}>! We're glad to have you here.`;
       const dmText = (welcomerConfig.dmMessage || defaultDm)
@@ -1502,24 +1545,77 @@ class UtilityModule {
     }
 
     // --- 3. CLEAN & PROFESSIONAL WELCOMER ANNOUNCEMENT IN WELCOME HUB ---
-    const targetChannelId = welcomerConfig.channelId;
-    const channel = (targetChannelId && member.guild.channels.cache.get(targetChannelId)) || member.guild.systemChannel;
+    let targetChannelId = welcomerConfig.channelId;
+    let channel = null;
+
+    if (targetChannelId && member.guild.channels) {
+      channel = member.guild.channels.cache?.get(targetChannelId) ||
+        (await member.guild.channels.fetch(targetChannelId).catch(() => null));
+    }
+
+    if (!channel && member.guild.channels) {
+      // Auto-discover welcome channel dynamically
+      let chanList = member.guild.channels.cache ? Array.from(member.guild.channels.cache.values()) : [];
+      if (!chanList.length && member.guild.channels.fetch) {
+        const fetched = await member.guild.channels.fetch().catch(() => null);
+        if (fetched) chanList = Array.from(fetched.values());
+      }
+      chanList = chanList.filter(Boolean);
+
+      channel = chanList.find(c =>
+        c && c.type === ChannelType.GuildText && (
+          /welcome[-_]?hub/i.test(c.name) ||
+          /welcome/i.test(c.name) ||
+          /arrival/i.test(c.name) ||
+          /joins/i.test(c.name)
+        )
+      ) || member.guild.systemChannel;
+
+      if (channel) {
+        welcomerConfig.channelId = channel.id;
+        welcomerConfig.enabled = true;
+        this.utilDb.set(`welcomer_${member.guild.id}`, welcomerConfig);
+        console.log(`[WELCOMER] Auto-discovered welcome channel: #${channel.name} (${channel.id})`);
+      }
+    }
 
     if (channel && welcomerConfig.enabled !== false) {
-      if (welcomerConfig.cardEnabled === true) {
-        const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join');
+      let sent = false;
+
+      // 1. Try Canvas Graphic Card + Luxury Embed
+      if (welcomerConfig.cardEnabled !== false) {
         try {
           const cardBuffer = await this.generateCard(member, welcomerConfig.theme || 'dark', 'join');
           const attachment = new AttachmentBuilder(cardBuffer, { name: 'welcome.png' });
-          await channel.send({ content: `<@${member.id}>`, embeds: [embed], files: [attachment] }).catch(() => {});
-        } catch (err) {
-          const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join');
-          await channel.send({ content: textMsg }).catch(() => {});
+          const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join');
+          await channel.send({ content: `<@${member.id}>`, embeds: [embed], files: [attachment] });
+          sent = true;
+        } catch (cardErr) {
+          console.warn('[WELCOMER] Canvas card failed, using luxury embed fallback:', cardErr.message);
         }
-      } else {
-        // Clean, High-End Professional Text Welcome Message
-        const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join');
-        await channel.send({ content: textMsg }).catch(() => {});
+      }
+
+      // 2. Fallback to Luxury Embed without attachment
+      if (!sent) {
+        try {
+          const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join');
+          embed.setImage(null);
+          await channel.send({ content: `<@${member.id}>`, embeds: [embed] });
+          sent = true;
+        } catch (embedErr) {
+          console.warn('[WELCOMER] Embed send failed, falling back to text message:', embedErr.message);
+        }
+      }
+
+      // 3. Final Fallback to Clean Text Message
+      if (!sent) {
+        try {
+          const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join');
+          await channel.send({ content: textMsg });
+          sent = true;
+        } catch (textErr) {
+          console.error(`[WELCOMER ERROR] Failed to send welcome message in #${channel.name}:`, textErr.message);
+        }
       }
     }
   }

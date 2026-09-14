@@ -1055,6 +1055,36 @@ async function runTests() {
     assert.ok(embed.data.description.includes('#42'));
     assert.ok(!embed.data.description.includes('#42th'), 'Double pound suffix #42th bug detected!');
     assert.strictEqual(embed.data.image.url, 'attachment://welcome.png');
+
+    // Test Auto-Discovery of Welcome Hub & Join Dispatch
+    let sentWelcomeMsg = null;
+    const mockWelcomeHubChan = {
+      id: 'welcome_hub_999',
+      name: '👋・welcome-hub',
+      type: ChannelType.GuildText,
+      send: async (payload) => { sentWelcomeMsg = payload; return payload; }
+    };
+    const testGuild = {
+      id: 'guild_welcomer_autodetect',
+      name: 'EDITX Network',
+      memberCount: 150,
+      channels: {
+        cache: new Map([['welcome_hub_999', mockWelcomeHubChan]])
+      }
+    };
+    const detected = await util.autoDetectWelcomeChannel(testGuild);
+    assert.ok(detected, 'Must auto-detect welcome-hub channel');
+    assert.strictEqual(detected.id, 'welcome_hub_999');
+
+    // Test handleJoin sends welcome to auto-detected channel
+    const joiningMember = {
+      id: 'new_member_123',
+      user: { id: 'new_member_123', username: 'NewEditor', createdTimestamp: Date.now() - 100000000 },
+      guild: testGuild,
+      send: async () => {}
+    };
+    await util.handleJoin(joiningMember);
+    assert.ok(sentWelcomeMsg, 'Welcome message must be dispatched on join');
   });
 
   await test('25. Hiring & Freelance In-App Modal Portal', async () => {

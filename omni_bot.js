@@ -174,9 +174,10 @@ client.once(Events.ClientReady, async () => {
     console.error('[REGISTRY WARNING] Failed to sync global commands:', err.message);
   }
 
-  // Pre-fetch invites across guilds
+  // Pre-fetch invites across guilds & auto-detect welcome channels
   for (const guild of client.guilds.cache.values()) {
     await utility.handleGuildCreate(guild);
+    await utility.autoDetectWelcomeChannel(guild);
   }
   console.log(`[INVITES] Cached invite tracking for ${client.inviteCache.size} guild(s).`);
 
@@ -187,6 +188,12 @@ client.once(Events.ClientReady, async () => {
       console.log(`[APPLICATION EMOJIS] Successfully cached ${appEmojis.size} application emojis.`);
     }
   } catch (e) {}
+});
+
+// Guild Join Event
+client.on(Events.GuildCreate, async (guild) => {
+  await utility.handleGuildCreate(guild);
+  await utility.autoDetectWelcomeChannel(guild);
 });
 
 // Member Lifecycle Events (Welcomer & Invite Tracking & Auto-Roles)
