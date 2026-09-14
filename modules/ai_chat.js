@@ -66,7 +66,7 @@ class AIChatModule {
         ),
       new SlashCommandBuilder()
         .setName('aiconfig')
-        .setDescription('Configure AI Chat channels and models')
+        .setDescription('Configure AI Chat channels, models, and mute channels')
         .addSubcommand(s =>
           s.setName('channel')
             .setDescription('Set a dedicated AI chat channel where bot answers without ping')
@@ -75,6 +75,16 @@ class AIChatModule {
         .addSubcommand(s =>
           s.setName('disable')
             .setDescription('Disable the dedicated AI chat channel')
+        )
+        .addSubcommand(s =>
+          s.setName('mute')
+            .setDescription('Mute AI replies in this channel')
+            .addChannelOption(o => o.setName('channel').setDescription('Channel to mute (defaults to current)').addChannelTypes(ChannelType.GuildText))
+        )
+        .addSubcommand(s =>
+          s.setName('unmute')
+            .setDescription('Unmute AI replies in a channel')
+            .addChannelOption(o => o.setName('channel').setDescription('Channel to unmute (defaults to current)').addChannelTypes(ChannelType.GuildText))
         )
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
         .setDMPermission(false)
@@ -122,6 +132,32 @@ class AIChatModule {
         this.db.set(key, cfg);
         return interaction.reply({ content: `✅ Dedicated AI chat channel disabled. You can still use \`@EditX\` or \`/ask\` anywhere!`, ephemeral: true });
       }
+
+      if (sub === 'mute') {
+        const targetChan = interaction.options.getChannel('channel') || interaction.channel;
+        const mutedKey = `aichat_muted_${guildId}`;
+        const mutedList = this.db.get(mutedKey) || [];
+        if (!mutedList.includes(targetChan.id)) {
+          mutedList.push(targetChan.id);
+          this.db.set(mutedKey, mutedList);
+        }
+        return interaction.reply({
+          content: `🤐 **AI Replies Muted**: I will no longer reply to pings or messages in <#${targetChan.id}>. Use \`/aiconfig unmute\` or ping me and say \`you can reply in this channel\` to restore.`,
+          ephemeral: true
+        });
+      }
+
+      if (sub === 'unmute') {
+        const targetChan = interaction.options.getChannel('channel') || interaction.channel;
+        const mutedKey = `aichat_muted_${guildId}`;
+        const mutedList = this.db.get(mutedKey) || [];
+        const updated = mutedList.filter(id => id !== targetChan.id);
+        this.db.set(mutedKey, updated);
+        return interaction.reply({
+          content: `🔊 **AI Replies Active**: I am now unmuted and will respond to questions in <#${targetChan.id}>!`,
+          ephemeral: true
+        });
+      }
     }
 
     return false;
@@ -134,8 +170,8 @@ class AIChatModule {
     if (message.author.bot || !message.guild) return false;
 
     // 1. If message pings any other user (e.g. @Alter), they are addressing that user, NEVER the bot!
-    const mentionedOtherUsers = message.mentions.users.filter(u => u.id !== this.client.user.id).size > 0;
-    if (mentionedOtherUsers) {
+    const usersList = message.mentions?.users ? (typeof message.mentions.users.filter === 'function' ? Array.from(message.mentions.users.filter(u => u.id !== this.client.user.id).values()) : Array.from(message.mentions.users.values()).filter(u => u.id !== this.client.user.id)) : [];
+    if (usersList.length > 0) {
       return false;
     }
 
@@ -159,6 +195,62 @@ class AIChatModule {
     let prompt = message.content.replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '').trim();
     // Strip all user, role, and channel mention syntax to check actual textual intent
     const textWithoutMentions = prompt.replace(/<@!?[0-9]+>|<@&[0-9]+>|<#[0-9]+>/g, '').trim();
+    const lower = textWithoutMentions.toLowerCase();
+
+    // Check if channel is currently muted for AI chat
+    const mutedKey = `aichat_muted_${guildId}`;
+    let mutedChannels = this.db.get(mutedKey) || [];
+    const isChannelMuted = mutedChannels.includes(message.channel.id);
+
+    // Permission helper: Allow staff, managers, administrators, and server owner
+    const canManageAI = message.member?.permissions?.has(PermissionFlagsBits.ManageMessages) ||
+                        message.member?.permissions?.has(PermissionFlagsBits.ManageChannels) ||
+                        message.member?.permissions?.has(PermissionFlagsBits.Administrator) ||
+                        message.author.id === message.guild.ownerId;
+
+    // A. Check for UNMUTE / TOGGLE ON command (e.g. "@EditX you can reply in this channel", "@EditX start replying here", "@EditX resume here", "@EditX unmute here")
+    const isUnmuteRequest = /\b(you\s+can\s+reply|start\s+replying|resume|unmute|talk\s+again|reply\s+again)\b/i.test(lower);
+    if (isUnmuteRequest && isMentioned) {
+      if (!canManageAI) {
+        return message.reply({
+          content: '⚠️ Only server moderators or administrators can toggle AI replies.',
+          allowedMentions: { repliedUser: false }
+        }).catch(() => {});
+      }
+      if (isChannelMuted) {
+        mutedChannels = mutedChannels.filter(id => id !== message.channel.id);
+        this.db.set(mutedKey, mutedChannels);
+      }
+      return message.reply({
+        content: `🔊 **AI Replies Resumed**: I am now active and will reply in <#${message.channel.id}> again!`,
+        allowedMentions: { repliedUser: false }
+      }).catch(() => {});
+    }
+
+    // B. Check for MUTE / TOGGLE OFF command (e.g. "@EditX dont reply in this channel", "@EditX stop replying here", "@EditX stay quiet here", "@EditX be quiet in this channel", "@EditX mute here")
+    const isMuteRequest = /\b(don'?t\s+reply|stop\s+replying|stay\s+quiet|be\s+quiet|mute|don'?t\s+talk|shut\s*up)\s*(in\s+this\s+channel|here|now)?\b/i.test(lower) ||
+                          /\b(don'?t\s+reply\s+in\s+this\s+channel|stop\s+talking\s+here)\b/i.test(lower);
+    if (isMuteRequest && isMentioned) {
+      if (!canManageAI) {
+        return message.reply({
+          content: '⚠️ Only server moderators or administrators can toggle AI replies.',
+          allowedMentions: { repliedUser: false }
+        }).catch(() => {});
+      }
+      if (!isChannelMuted) {
+        mutedChannels.push(message.channel.id);
+        this.db.set(mutedKey, mutedChannels);
+      }
+      return message.reply({
+        content: `🤐 **Quiet Mode Activated**: I will keep quiet and won't reply in <#${message.channel.id}>. Ping me and say \`you can reply in this channel\` whenever you want me back!`,
+        allowedMentions: { repliedUser: false }
+      }).catch(() => {});
+    }
+
+    // C. If this channel is muted, stay completely quiet!
+    if (isChannelMuted) {
+      return false;
+    }
 
     // If message was ONLY a direct ping to the bot with no question or text
     if (isMentioned && textWithoutMentions.length === 0) {
@@ -175,7 +267,6 @@ class AIChatModule {
     }
 
     // Quick courteous reaction for short acknowledgments ("thanks", "ok", "cool")
-    const lower = textWithoutMentions.toLowerCase();
     if (/^(thanks|thank you|thx|ty|tyvm|appreciate it|ok|okay|cool|nice|np|got it)\b/i.test(lower)) {
       await message.react('❤️').catch(() => {});
       return true;

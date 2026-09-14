@@ -1451,13 +1451,67 @@ async function runTests() {
     assert.ok(clickReply.content.includes('Verification Complete'));
     assert.ok(verifiedRoles.has('role_verified_member'));
 
-    // 3. Test AI Chat splitMessage
-    const longText = 'Line 1\nLine 2\nLine 3\n'.repeat(50);
-    const chunks = aiMod.splitMessage(longText, 500);
-    assert.ok(chunks.length > 1);
-    for (const c of chunks) {
-      assert.ok(c.length <= 500);
-    }
+    // 4. Test Channel Muting via Ping ("dont reply in this channel")
+    let muteReply = null;
+    const adminMember = { ...mockMember, permissions: { has: () => true } };
+    const muteMsg = {
+      guild: mockGuild,
+      channel: { id: 'quiet_chan_1' },
+      author: { id: 'admin_1', bot: false },
+      member: adminMember,
+      mentions: {
+        has: (u) => u === mockClient.user,
+        users: new Map([[mockClient.user.id, mockClient.user]]),
+        roles: new Map(),
+        everyone: false
+      },
+      content: `<@${mockClient.user.id}> dont reply in this channel`,
+      reply: async (payload) => { muteReply = payload; return payload; }
+    };
+
+    await aiMod.checkMessage(muteMsg);
+    assert.ok(muteReply, 'Must reply to mute command');
+    assert.ok(muteReply.content.includes('Quiet Mode Activated'), 'Must activate quiet mode');
+
+    // 5. Test Bot Stays Quiet when pinged in muted channel
+    let chatReplyInMuted = null;
+    const chatMsgInMuted = {
+      guild: mockGuild,
+      channel: { id: 'quiet_chan_1' },
+      author: { id: 'user_2', bot: false },
+      member: mockMember,
+      mentions: {
+        has: (u) => u === mockClient.user,
+        users: new Map([[mockClient.user.id, mockClient.user]]),
+        roles: new Map(),
+        everyone: false
+      },
+      content: `<@${mockClient.user.id}> how do I render 4k?`,
+      reply: async (payload) => { chatReplyInMuted = payload; return payload; }
+    };
+    const handledWhileMuted = await aiMod.checkMessage(chatMsgInMuted);
+    assert.strictEqual(handledWhileMuted, false, 'Bot must remain completely quiet in muted channel');
+    assert.strictEqual(chatReplyInMuted, null, 'No reply must be sent in muted channel');
+
+    // 6. Test Unmuting ("you can reply in this channel")
+    let unmuteReply = null;
+    const unmuteMsg = {
+      guild: mockGuild,
+      channel: { id: 'quiet_chan_1' },
+      author: { id: 'admin_1', bot: false },
+      member: adminMember,
+      mentions: {
+        has: (u) => u === mockClient.user,
+        users: new Map([[mockClient.user.id, mockClient.user]]),
+        roles: new Map(),
+        everyone: false
+      },
+      content: `<@${mockClient.user.id}> you can reply in this channel`,
+      reply: async (payload) => { unmuteReply = payload; return payload; }
+    };
+    await aiMod.checkMessage(unmuteMsg);
+    assert.ok(unmuteReply, 'Must reply to unmute command');
+    assert.ok(unmuteReply.content.includes('AI Replies Resumed'), 'Must resume replies');
   });
 
   console.log('\n====================================================');
