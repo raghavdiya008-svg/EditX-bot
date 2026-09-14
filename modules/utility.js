@@ -822,16 +822,23 @@ class UtilityModule {
         const member = interaction.member;
 
         try {
-          const cardBuffer = await this.generateCard(member, config.theme || 'dark', type);
-          const fileName = type === 'join' ? 'welcome.png' : 'leave.png';
-          const attachment = new AttachmentBuilder(cardBuffer, { name: fileName });
-          const embed = this.buildWelcomerEmbed(member, config, type);
+          if (config.cardEnabled === true) {
+            const cardBuffer = await this.generateCard(member, config.theme || 'dark', type);
+            const fileName = type === 'join' ? 'welcome.png' : 'leave.png';
+            const attachment = new AttachmentBuilder(cardBuffer, { name: fileName });
+            const embed = this.buildWelcomerEmbed(member, config, type);
 
-          await interaction.editReply({
-            content: `<@${member.id}>`,
-            embeds: [embed],
-            files: [attachment]
-          });
+            await interaction.editReply({
+              content: `<@${member.id}>`,
+              embeds: [embed],
+              files: [attachment]
+            });
+          } else {
+            const textMsg = this.buildWelcomerTextMessage(member, config, type);
+            await interaction.editReply({
+              content: textMsg
+            });
+          }
         } catch (err) {
           return interaction.editReply(`❌ Simulation error: ${err.message}`);
         }
@@ -1355,6 +1362,52 @@ class UtilityModule {
     return embed;
   }
 
+  buildWelcomerTextMessage(member, config = {}, type = 'join') {
+    const isJoin = type === 'join';
+    const guild = member.guild;
+    const memberNum = guild?.memberCount || 1;
+    const ordinal = this.getOrdinal(memberNum);
+    const serverName = guild?.name || 'EDITX | The Creative Network';
+    const username = member.user?.username || member.displayName || 'Member';
+
+    // Discover server navigation channels dynamically
+    const chanList = guild?.channels?.cache ? Array.from(guild.channels.cache.values()).filter(Boolean) : [];
+    const rolesChan = chanList.find(c => c.name && (c.name.includes('get-roles') || c.name.includes('role') || c.name.includes('verify'))) || null;
+    const rulesChan = chanList.find(c => c.name && (c.name.includes('rule') || c.name.includes('guideline'))) || null;
+    const chatChan = chanList.find(c => c.name && (c.name.includes('general') || c.name.includes('chat') || c.name.includes('lounge') || c.name.includes('discussion'))) || null;
+
+    const navParts = [];
+    if (rolesChan) navParts.push(`🎭 **Roles:** <#${rolesChan.id}>`);
+    if (rulesChan) navParts.push(`📜 **Rules:** <#${rulesChan.id}>`);
+    if (chatChan) navParts.push(`💬 **Chat:** <#${chatChan.id}>`);
+
+    const navLine = navParts.length > 0 ? `\n> ⚡ **Quick Start:** ${navParts.join('  •  ')}` : '';
+
+    const createdTs = member.user?.createdTimestamp ? Math.floor(member.user.createdTimestamp / 1000) : null;
+    const accountAgeText = createdTs ? `<t:${createdTs}:R>` : 'Recent';
+
+    if (isJoin) {
+      if (config.message && config.message.trim()) {
+        return config.message
+          .replace(/\{user\}/gi, `<@${member.id}>`)
+          .replace(/\{server\}/gi, serverName)
+          .replace(/#\{membercount\}/gi, `#${memberNum}`)
+          .replace(/\{membercount\}/gi, `${ordinal}`);
+      }
+      return `🎬 **Welcome <@${member.id}> to ${serverName}!**\n` +
+        `> 👤 **Member:** \`#${memberNum}\`　•　📅 **Account Created:** ${accountAgeText}${navLine}`;
+    } else {
+      if (config.leaveMessage && config.leaveMessage.trim()) {
+        return config.leaveMessage
+          .replace(/\{user\}/gi, `<@${member.id}>`)
+          .replace(/\{server\}/gi, serverName)
+          .replace(/#\{membercount\}/gi, `#${memberNum}`)
+          .replace(/\{membercount\}/gi, `${ordinal}`);
+      }
+      return `👋 **${username}** has left **${serverName}**. (Remaining: \`#${memberNum}\`)`;
+    }
+  }
+
   async handleJoin(member) {
     let inviterId = null;
     let isFake = false;
@@ -1448,22 +1501,25 @@ class UtilityModule {
       member.send(dmText).catch(() => {});
     }
 
-    // --- 3. CLEAN & STYLED WELCOMER ANNOUNCEMENT IN WELCOME HUB ---
+    // --- 3. CLEAN & PROFESSIONAL WELCOMER ANNOUNCEMENT IN WELCOME HUB ---
     const targetChannelId = welcomerConfig.channelId;
     const channel = (targetChannelId && member.guild.channels.cache.get(targetChannelId)) || member.guild.systemChannel;
 
     if (channel && welcomerConfig.enabled !== false) {
-      const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join');
-      if (welcomerConfig.cardEnabled !== false) {
+      if (welcomerConfig.cardEnabled === true) {
+        const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join');
         try {
           const cardBuffer = await this.generateCard(member, welcomerConfig.theme || 'dark', 'join');
           const attachment = new AttachmentBuilder(cardBuffer, { name: 'welcome.png' });
           await channel.send({ content: `<@${member.id}>`, embeds: [embed], files: [attachment] }).catch(() => {});
         } catch (err) {
-          await channel.send({ content: `<@${member.id}>`, embeds: [embed] }).catch(() => {});
+          const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join');
+          await channel.send({ content: textMsg }).catch(() => {});
         }
       } else {
-        await channel.send({ content: `<@${member.id}>`, embeds: [embed] }).catch(() => {});
+        // Clean, High-End Professional Text Welcome Message
+        const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join');
+        await channel.send({ content: textMsg }).catch(() => {});
       }
     }
   }
