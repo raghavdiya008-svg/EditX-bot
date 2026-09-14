@@ -1,0 +1,23 @@
+{
+  "stats_1538957031455596544": {
+    "categoryId": "1548694422923907092",
+    "channelId": "1548694425151078511"
+  },
+  "stats_channels_1538957031455596544": {
+    "categoryId": "1548735257203974285",
+    "memberChannelId": "1548735259770757180",
+    "boostChannelId": "1548735261909979256"
+  },
+  "welcomer_1538957031455596544": {
+    "enabled": true,
+    "channelId": "1540409717967421500",
+    "cardEnabled": true,
+    "dmEnabled": false,
+    "theme": "dark"
+  },
+  "bump_cfg_1538957031455596544": {
+    "channelId": "1540707425110204586",
+    "roleId": "1538964380090245221",
+    "updatedAt": 1789319722074
+  }
+}
