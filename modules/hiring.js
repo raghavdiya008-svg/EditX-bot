@@ -250,6 +250,64 @@ class HiringModule {
     return false;
   }
 
+  /**
+   * Resolves the designated channel for hiring or for-hire listings
+   * Checks database configuration, then auto-detects by channel keywords, with fallback
+   */
+  async resolveChannel(guild, type, fallbackChannel) {
+    if (!guild) return fallbackChannel;
+
+    const dbKey = type === 'hiring' ? `hiring_chan_${guild.id}` : `forhire_chan_${guild.id}`;
+    const configuredId = this.db?.get ? this.db.get(dbKey) : null;
+
+    if (configuredId) {
+      if (fallbackChannel && fallbackChannel.id === configuredId && typeof fallbackChannel.send === 'function') {
+        return fallbackChannel;
+      }
+      const cached = guild.channels?.cache?.get ? guild.channels.cache.get(configuredId) : null;
+      if (cached && typeof cached.send === 'function') {
+        return cached;
+      }
+      if (guild.channels?.fetch) {
+        const fetched = await guild.channels.fetch(configuredId).catch(() => null);
+        if (fetched && typeof fetched.send === 'function') {
+          return fetched;
+        }
+      }
+    }
+
+    // Auto-detect by channel name keywords
+    const keywords = type === 'hiring'
+      ? ['hiring', 'job-postings', 'jobs', 'hire-an-editor', 'job-board', 'recruitment']
+      : ['for-hire', 'hireable', 'freelance', 'services', 'creators-for-hire', 'portfolio'];
+
+    let allChans = [];
+    if (guild.channels?.cache && typeof guild.channels.cache.values === 'function') {
+      allChans = Array.from(guild.channels.cache.values());
+    }
+    if (!allChans.length && guild.channels?.fetch) {
+      const fetchedAll = await guild.channels.fetch().catch(() => null);
+      if (fetchedAll && typeof fetchedAll.values === 'function') {
+        allChans = Array.from(fetchedAll.values());
+      }
+    }
+
+    const detected = allChans.find(c =>
+      c && (c.type === ChannelType.GuildText || c.type === 0) &&
+      typeof c.send === 'function' &&
+      keywords.some(k => (c.name || '').toLowerCase().includes(k))
+    );
+
+    if (detected) {
+      if (this.db?.set) {
+        this.db.set(dbKey, detected.id);
+      }
+      return detected;
+    }
+
+    return fallbackChannel;
+  }
+
   async handleInteraction(interaction) {
     // 1. Button Clicks (Open Modal)
     if (interaction.isButton()) {
@@ -296,8 +354,7 @@ class HiringModule {
           });
         }
 
-        const hiringChanId = this.db.get(`hiring_chan_${guild.id}`) || interaction.channel.id;
-        const targetChan = guild.channels.cache.get(hiringChanId) || interaction.channel;
+        const targetChan = await this.resolveChannel(guild, 'hiring', interaction.channel);
 
         const embed = new EmbedBuilder()
           .setColor(0x10B981) // Emerald Green
@@ -361,8 +418,7 @@ class HiringModule {
         const description = interaction.fields.getTextInputValue('description');
         const contact = interaction.fields.getTextInputValue('contact');
 
-        const forHireChanId = this.db?.get ? this.db.get(`forhire_chan_${guild.id}`) : null || interaction.channel.id;
-        const targetChan = guild.channels.cache.get(forHireChanId) || interaction.channel;
+        const targetChan = await this.resolveChannel(guild, 'forhire', interaction.channel);
 
         const embed = new EmbedBuilder()
           .setColor(0x6366F1) // Cyber Indigo

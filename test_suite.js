@@ -1864,6 +1864,74 @@ async function runTests() {
     assert.strictEqual(backupResult.success, true, 'backupState must succeed');
     assert.strictEqual(deletedCount, 2, 'Previous snapshot messages must be cleaned up to avoid channel clutter');
     assert.ok(sentSnapshot, 'New snapshot must be sent');
+
+    // 6. Test Cross-Channel Publishing: /post executed from #general-chat publishes to #hiring
+    let crossChanPublishedPayload = null;
+    let crossChanThreadCreated = null;
+    const designatedHiringChan = {
+      id: 'designated_hiring_77',
+      name: '💼・hiring',
+      type: ChannelType.GuildText,
+      send: async (p) => {
+        crossChanPublishedPayload = p;
+        return {
+          id: 'cross_chan_msg_1',
+          startThread: async (opts) => {
+            crossChanThreadCreated = opts;
+            return {
+              id: 'cross_chan_thread_1',
+              send: async () => {}
+            };
+          }
+        };
+      }
+    };
+    const randomGeneralChan = {
+      id: 'general_chat_44',
+      name: 'general-chat',
+      type: ChannelType.GuildText,
+      send: async () => { throw new Error('Should NOT post in general chat!'); }
+    };
+
+    const crossChanGuild = {
+      ...mockGuild,
+      id: 'cross_chan_guild_99',
+      channels: {
+        cache: new Map([
+          ['designated_hiring_77', designatedHiringChan],
+          ['general_chat_44', randomGeneralChan]
+        ]),
+        fetch: async () => crossChanGuild.channels.cache
+      }
+    };
+
+    let crossChanModalReply = null;
+    await hiring.handleInteraction({
+      isButton: () => false,
+      isStringSelectMenu: () => false,
+      isModalSubmit: () => true,
+      customId: 'hiring_submit_hiring',
+      user: mockUser,
+      guild: crossChanGuild,
+      channel: randomGeneralChan, // User executes from #general-chat!
+      fields: {
+        getTextInputValue: (name) => {
+          const map = {
+            role: 'Motion Graphics Designer',
+            budget: '$100/min',
+            description: 'Looking for 3D motion designer for tech explainer videos.',
+            timeline: '3 days',
+            contact: 'DM @Creator'
+          };
+          return map[name] || '';
+        }
+      },
+      reply: async (payload) => { crossChanModalReply = payload; }
+    });
+
+    assert.ok(crossChanPublishedPayload, 'Listing must be published to designated hiring channel, not general');
+    assert.ok(crossChanModalReply.content.includes('<#designated_hiring_77>'), 'Reply must point user to #hiring channel');
+    assert.ok(crossChanThreadCreated, 'Thread must be created under the post in #hiring');
   });
 
   console.log('\n====================================================');
