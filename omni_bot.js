@@ -39,6 +39,8 @@ const DecorationModule = require('./modules/decoration');
 const RolesModule = require('./modules/roles');
 const LoggingModule = require('./modules/logging');
 const AIModerationModule = require('./modules/ai_moderator');
+const AutonomousSentinelModule = require('./modules/autonomous_sentinel');
+const HousekeeperModule = require('./modules/housekeeper');
 const TagsModule = require('./modules/tags');
 const HiringModule = require('./modules/hiring');
 
@@ -95,6 +97,8 @@ const decoration = new DecorationModule(client, db);
 const roles = new RolesModule(client, db);
 const logging = new LoggingModule(client, db);
 const aiModerator = new AIModerationModule(client, db);
+const sentinel = new AutonomousSentinelModule(client, db);
+const housekeeper = new HousekeeperModule(client, db, sentinel);
 const tags = new TagsModule(client, db);
 const hiring = new HiringModule(client, db);
 
@@ -108,6 +112,8 @@ const modules = [
   roles,
   logging,
   aiModerator,
+  sentinel,
+  housekeeper,
   tags,
   hiring
 ];
@@ -169,25 +175,56 @@ client.on(Events.GuildMemberRemove, async (member) => {
   await roles.handleMemberLeave(member);
 });
 
-// Essential Event Routing: Honeypot, AI Mod Sentinel, Bump Buddy, Sticky Tags & Hiring Guard
+// Essential Event Routing: Honeypot, Autonomous Sentinel, Staff Copilot, Bump Buddy, Showcase Auto-Threads, Sticky Tags & Hiring Guard
 client.on(Events.MessageCreate, async (message) => {
   if (!message.guild) return;
+
+  // 0. Track message for Ghost-Ping detection
+  housekeeper.trackMessage(message);
 
   // 1. Honeypot Trap: unauthorized accounts speaking in honeypot are softbanned immediately
   const isHoneypot = await moderation.checkHoneypot(message);
   if (isHoneypot) return;
 
-  // 2. AI Moderation Copilot: Scans suspicious content and reports to mods in report-only mode
+  // 2. Autonomous Sentinel (Modcord-style multi-message sliding-window context evaluation)
+  const handledBySentinel = await sentinel.checkMessage(message);
+  if (handledBySentinel) return;
+
+  // 3. Staff Ping AI Responder (Answers questions or auto-forwards to human staff)
+  const handledStaffPing = await housekeeper.handleStaffPing(message);
+  if (handledStaffPing) return;
+
+  // 4. Showcase Auto-Threading: Automatically opens discussion thread on video uploads
+  if (!message.author.bot && message.channel.name && (message.channel.name.includes('showcase') || message.channel.name.includes('portfolio'))) {
+    if (message.attachments.size > 0 || /https?:\/\/(www\.)?(youtube\.com|youtu\.be|streamable\.com|drive\.google\.com|vimeo\.com|tiktok\.com)/i.test(message.content)) {
+      try {
+        if (!message.hasThread && message.channel.threads) {
+          const thread = await message.startThread({
+            name: `🎬 Feedback • ${message.author.username}'s Edit`,
+            autoArchiveDuration: 1440
+          });
+          thread.send(`💬 **Feedback Thread Opened!** Leave your color grading notes, audio feedback, and pacing critiques for <@${message.author.id}>.`).catch(() => {});
+        }
+      } catch (tErr) {}
+    }
+  }
+
+  // 5. AI Moderation Copilot: Scans suspicious content and reports to mods in report-only mode
   await aiModerator.checkMessage(message);
 
-  // 3. Bump Buddy: Inspects Disboard / Bump Buddy confirmations
+  // 6. Bump Buddy: Inspects Disboard / Bump Buddy confirmations
   utility.checkBump(message);
 
-  // 4. Tags, AFK, Auto-Responders & Persistent Sticky Message Reposting
+  // 7. Tags, AFK, Auto-Responders & Persistent Sticky Message Reposting
   await tags.checkMessage(message);
 
-  // 5. Hiring Channel Guard: Cleans off-topic chatter and routes through 1-click modal forms
+  // 8. Hiring Channel Guard: Cleans off-topic chatter and routes through 1-click modal forms
   await hiring.checkMessage(message);
+});
+
+// Ghost-Ping Detection on Message Deletion
+client.on(Events.MessageDelete, async (message) => {
+  await housekeeper.handleMessageDelete(message);
 });
 
 // Unified Interaction Router (Commands, Buttons, Menus, Modals)

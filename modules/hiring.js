@@ -256,6 +256,18 @@ class HiringModule {
         const timeline = interaction.fields.getTextInputValue('timeline') || 'Flexible / As Agreed';
         const contact = interaction.fields.getTextInputValue('contact');
 
+        // Category Verification Guard: Prevents members from posting "For Hire" in "Hiring"
+        const lowerCombined = `${role} ${description}`.toLowerCase();
+        const isSelfPromotion = /\b(hire me|i am an editor|i'm an editor|looking for clients|offering my editing|my portfolio|my showreel|freelancer for hire|my services)\b/i.test(lowerCombined);
+        if (isSelfPromotion) {
+          const forHireChanId = this.db.get(`forhire_chan_${guild.id}`);
+          const targetText = forHireChanId ? `<#${forHireChanId}>` : 'the **#for-hire** channel';
+          return interaction.reply({
+            content: `⚠️ **Category Misplacement Notice**: It looks like you are advertising your services as an editor rather than hiring someone.\n\nPlease submit your profile in ${targetText} by clicking **Post Services**!`,
+            ephemeral: true
+          });
+        }
+
         const hiringChanId = this.db.get(`hiring_chan_${guild.id}`) || interaction.channel.id;
         const targetChan = guild.channels.cache.get(hiringChanId) || interaction.channel;
 
