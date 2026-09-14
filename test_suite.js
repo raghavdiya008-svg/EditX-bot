@@ -1602,6 +1602,152 @@ async function runTests() {
     assert.ok(systemPromptCheck, 'AI response must be generated with custom directives context');
   });
 
+  await test('32. Deep Server Scan & Live Directive Command Ingestion', async () => {
+    const memMod = new BotMemoryModule(mockClient, db);
+    const aiChat = new AIChatModule(mockClient, db, memMod);
+
+    const scanGuild = {
+      id: 'scan_guild_99',
+      name: 'EditX Creators Hub',
+      memberCount: 150,
+      ownerId: 'owner_user_99',
+      roles: {
+        cache: new Map([
+          ['r1', { id: 'r1', name: 'Server Owner', position: 10 }],
+          ['r2', { id: 'r2', name: 'Moderator', position: 8 }],
+          ['r3', { id: 'r3', name: 'Lead Editor', position: 5 }]
+        ]),
+        fetch: async () => scanGuild.roles.cache,
+        everyone: { id: 'scan_guild_99' }
+      },
+      channels: {
+        cache: new Map([
+          ['cat1', { id: 'cat1', name: 'WELCOME', type: ChannelType.GuildCategory }],
+          ['c_rules', {
+            id: 'c_rules',
+            name: 'rules-and-info',
+            type: ChannelType.GuildText,
+            parentId: 'cat1',
+            topic: 'Official server rules',
+            messages: {
+              fetch: async () => new Map([
+                ['m1', { author: { id: 'owner_user_99', bot: false }, content: 'No unsolicited promotion in general.' }]
+              ])
+            }
+          }],
+          ['c_gen', { id: 'c_gen', name: 'general-chat', type: ChannelType.GuildText, parentId: 'cat1', topic: 'Casual editing talk' }]
+        ]),
+        fetch: async () => scanGuild.channels.cache,
+        create: async (data) => {
+          const chan = {
+            id: `chan_${data.name}`,
+            name: data.name,
+            type: data.type,
+            permissionOverwrites: data.permissionOverwrites,
+            send: async () => ({ id: 'msg_created' }),
+            messages: { fetch: async () => new Map() }
+          };
+          scanGuild.channels.cache.set(chan.id, chan);
+          return chan;
+        }
+      },
+      members: {
+        me: { id: mockClient.user.id },
+        fetchMe: async () => ({ id: mockClient.user.id })
+      }
+    };
+
+    // 1. Test Server Deep-Scan Engine
+    const scanResult = await memMod.scanServer(scanGuild, { username: 'Owner' });
+    assert.strictEqual(scanResult.success, true, 'Server scan must succeed');
+    assert.ok(scanResult.textCount >= 2, 'Must scan text channels');
+    assert.ok(scanResult.manifest.includes('EDITX CREATORS HUB'), 'Manifest must include server name');
+    assert.ok(scanResult.manifest.includes('No unsolicited promotion'), 'Manifest must extract rules');
+
+    // Context retrieval test
+    const ctx = memMod.getServerContext('scan_guild_99');
+    assert.ok(ctx.includes('rules-and-info'), 'Server context must be accessible in RAM/DB');
+
+    // 2. Test Admin command: "don't send any kind of msg in this server"
+    const adminUser = { id: 'owner_user_99', username: 'Owner', bot: false };
+    const adminMember = {
+      id: 'owner_user_99',
+      user: adminUser,
+      displayName: 'Owner',
+      permissions: { has: () => true }
+    };
+
+    const reactions = [];
+    let sentReply = null;
+    const muteMsg = {
+      guild: scanGuild,
+      channel: scanGuild.channels.cache.get('c_gen'),
+      author: adminUser,
+      member: adminMember,
+      content: `<@${mockClient.user.id}> don't send any kind of msg in this server`,
+      mentions: {
+        has: (u) => u.id === mockClient.user.id,
+        users: new Map([[mockClient.user.id, mockClient.user]])
+      },
+      react: async (emoji) => { reactions.push(emoji); },
+      reply: async (payload) => { sentReply = payload; return sentReply; }
+    };
+
+    const handledMute = await aiChat.checkMessage(muteMsg);
+    assert.strictEqual(handledMute, true, 'Must handle server mute command');
+    assert.ok(reactions.includes('🧠'), 'Must react with 🧠 on command recognition');
+    assert.ok(reactions.includes('🤐'), 'Must react with 🤐 on silence command');
+    assert.ok(sentReply.content.includes('Server-Wide AI Replies Muted'), 'Reply must confirm server-wide mute');
+
+    // Verify DB state and directive
+    const isServerMuted = db.utility.get('aichat_muted_server_scan_guild_99');
+    assert.strictEqual(isServerMuted, true, 'Server-wide mute must be true in database');
+
+    const directives = memMod.getDirectivesList('scan_guild_99');
+    assert.ok(directives.some(d => d.includes('Do not send any messages anywhere in this server')), 'Directive must be stored in rulebook');
+
+    // 3. Verify that normal chat is completely silenced while server-wide mute is active
+    let regularReply = null;
+    const memberMsg = {
+      guild: scanGuild,
+      channel: scanGuild.channels.cache.get('c_gen'),
+      author: { id: 'member_1', username: 'Member1', bot: false },
+      member: { id: 'member_1', user: { id: 'member_1' }, permissions: { has: () => false } },
+      content: `<@${mockClient.user.id}> what is the best frame rate for youtube?`,
+      mentions: {
+        has: (u) => u.id === mockClient.user.id,
+        users: new Map([[mockClient.user.id, mockClient.user]])
+      },
+      react: async () => {},
+      reply: async (payload) => { regularReply = payload; }
+    };
+    const memberHandled = await aiChat.checkMessage(memberMsg);
+    assert.strictEqual(memberHandled, false, 'Bot must stay completely quiet when server-wide mute is active');
+    assert.strictEqual(regularReply, null, 'No reply should be sent');
+
+    // 4. Test Admin command: "you can reply in this server"
+    const unmuteReactions = [];
+    let unmuteReply = null;
+    const unmuteMsg = {
+      guild: scanGuild,
+      channel: scanGuild.channels.cache.get('c_gen'),
+      author: adminUser,
+      member: adminMember,
+      content: `<@${mockClient.user.id}> you can reply in this server`,
+      mentions: {
+        has: (u) => u.id === mockClient.user.id,
+        users: new Map([[mockClient.user.id, mockClient.user]])
+      },
+      react: async (emoji) => { unmuteReactions.push(emoji); },
+      reply: async (payload) => { unmuteReply = payload; return unmuteReply; }
+    };
+    const handledUnmute = await aiChat.checkMessage(unmuteMsg);
+    assert.strictEqual(handledUnmute, true, 'Must handle server unmute command');
+    assert.ok(unmuteReactions.includes('🧠'), 'Must react with 🧠 on unmute');
+    assert.ok(unmuteReactions.includes('🔊'), 'Must react with 🔊 on unmute');
+    assert.strictEqual(db.utility.get('aichat_muted_server_scan_guild_99'), false, 'Server-wide mute must be cleared in DB');
+  });
+
   console.log('\n====================================================');
   console.log(`🏁 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('====================================================\n');

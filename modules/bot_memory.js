@@ -29,6 +29,9 @@ class BotMemoryModule {
     // Cache of channel IDs per guild: Map<guildId, { memoryChanId, rulesChanId }>
     this.channelCache = new Map();
 
+    // In-memory cache of scanned server structure and knowledge
+    this.serverContextCache = new Map();
+
     // Scheduled periodic backups every 15 minutes
     setInterval(() => this.runScheduledBackups(), 15 * 60 * 1000);
   }
@@ -54,17 +57,58 @@ class BotMemoryModule {
           s.setName('status')
             .setDescription('Check memory vault health and sync status')
         )
+        .addSubcommand(s =>
+          s.setName('scan')
+            .setDescription('Deep-scan all channels, rules & categories into bot memory')
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDMPermission(false),
+
+      new SlashCommandBuilder()
+        .setName('scan')
+        .setDescription('Deep-scan the entire server so EditX AI understands everything')
+        .addSubcommand(s =>
+          s.setName('server')
+            .setDescription('Scan all channels, categories, rules, and roles into bot memory')
+        )
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .setDMPermission(false)
     ];
   }
 
   async handleCommand(interaction) {
-    if (interaction.commandName !== 'memory') return false;
+    if (interaction.commandName !== 'memory' && interaction.commandName !== 'scan') return false;
 
-    const sub = interaction.options.getSubcommand();
     const guild = interaction.guild;
     await interaction.deferReply({ ephemeral: true });
+
+    if (interaction.commandName === 'scan' || (interaction.commandName === 'memory' && interaction.options.getSubcommand() === 'scan')) {
+      const result = await this.scanServer(guild, interaction.user);
+      if (result.success) {
+        const memChan = await this.getMemoryChannel(guild);
+        const rulesChan = await this.getRulesChannel(guild);
+        const embed = new EmbedBuilder()
+          .setColor(0x5865F2)
+          .setTitle('🌐 Server Deep-Scan & Memory Ingestion Complete')
+          .setDescription(
+            `EditX AI has thoroughly analyzed and memorized the layout, rules, and structure of **${guild.name}**!\n\n` +
+            `• 📂 **Categories Mapped:** \`${result.categoryCount}\`\n` +
+            `• 💬 **Text/Announce Channels Scanned:** \`${result.textCount}\` (total: \`${result.channelCount}\` channels)\n` +
+            `• 📜 **Server Rules/Guidelines Extracted:** \`${result.rulesFound}\`\n` +
+            `• 🛡️ **Roles Analyzed:** \`${result.roleCount}\`\n\n` +
+            `🤖 **Knowledge Vault:** ${memChan ? `<#${memChan.id}>` : '`#bot-memory`'} *(full markdown manifest attached)*\n` +
+            `📋 **Active Directives:** ${rulesChan ? `<#${rulesChan.id}>` : '`#bot-rules`'}`
+          )
+          .setFooter({ text: 'EditX Autonomous Autopilot • Server Context Synced' })
+          .setTimestamp();
+
+        return interaction.editReply({ embeds: [embed] });
+      } else {
+        return interaction.editReply(`⚠️ **Server Scan Failed**: ${result.error}`);
+      }
+    }
+
+    const sub = interaction.options.getSubcommand();
 
     if (sub === 'backup') {
       const result = await this.backupState(guild);
@@ -145,6 +189,11 @@ class BotMemoryModule {
       if (rulesChan) {
         await this.syncDirectives(guild);
       }
+
+      // 4. Auto-scan server structure if not yet cached
+      if (!this.serverContextCache.has(guild.id) && !this.utilDb.get(`server_context_${guild.id}`)) {
+        await this.scanServer(guild, null);
+      }
     } catch (err) {
       console.warn(`[BOT MEMORY] Initialization notice for ${guild.name}:`, err.message);
     }
@@ -162,16 +211,17 @@ class BotMemoryModule {
 
     try {
       const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
+      const everyoneId = guild.roles.everyone?.id || guild.id;
       const chan = await guild.channels.create({
         name: '🤖・bot-memory',
         type: ChannelType.GuildText,
         topic: 'EditX Bot Persistent State Vault • Automatic Cloud Backup • Do Not Delete',
         permissionOverwrites: [
           {
-            id: guild.roles.everyone.id,
+            id: everyoneId,
             deny: [PermissionFlagsBits.ViewChannel]
           },
-          ...(me ? [{
+          ...(me && me.id ? [{
             id: me.id,
             allow: [
               PermissionFlagsBits.ViewChannel,
@@ -205,16 +255,17 @@ class BotMemoryModule {
 
     try {
       const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
+      const everyoneId = guild.roles.everyone?.id || guild.id;
       const chan = await guild.channels.create({
         name: '📋・bot-rules',
         type: ChannelType.GuildText,
         topic: 'EditX Bot Live Custom Directives • Post rules here for the bot to follow',
         permissionOverwrites: [
           {
-            id: guild.roles.everyone.id,
+            id: everyoneId,
             deny: [PermissionFlagsBits.ViewChannel]
           },
-          ...(me ? [{
+          ...(me && me.id ? [{
             id: me.id,
             allow: [
               PermissionFlagsBits.ViewChannel,
@@ -310,6 +361,8 @@ class BotMemoryModule {
           stats_channels: this.utilDb.get(`stats_channels_${guild.id}`),
           aichat_cfg: this.utilDb.get(`aichat_cfg_${guild.id}`),
           aichat_muted: this.utilDb.get(`aichat_muted_${guild.id}`),
+          aichat_muted_server: this.utilDb.get(`aichat_muted_server_${guild.id}`),
+          server_context: this.utilDb.get(`server_context_${guild.id}`),
           bump_cfg: this.utilDb.get(`bump_cfg_${guild.id}`)
         },
         config: {
@@ -329,6 +382,7 @@ class BotMemoryModule {
           `• Timestamp: <t:${Math.floor(Date.now() / 1000)}:F>\n` +
           `• Welcomer: ${stateSnapshot.utility.welcomer?.channelId ? `<#${stateSnapshot.utility.welcomer.channelId}>` : 'Default'}\n` +
           `• Muted Channels: \`${(stateSnapshot.utility.aichat_muted || []).length}\` channel(s)\n` +
+          `• Server-Wide Mute: \`${stateSnapshot.utility.aichat_muted_server ? 'Active (Silent)' : 'Disabled'}\`\n` +
           `• Stats Channels: ${stateSnapshot.utility.stats_channels ? 'Configured' : 'None'}`
         )
         .setFooter({ text: 'EditX State Vault • Auto-restores across Render deployments' })
@@ -399,6 +453,15 @@ class BotMemoryModule {
         }
         if (snapshot.utility.aichat_muted) {
           this.utilDb.set(`aichat_muted_${guild.id}`, snapshot.utility.aichat_muted);
+          restoredCount++;
+        }
+        if (snapshot.utility.aichat_muted_server !== undefined) {
+          this.utilDb.set(`aichat_muted_server_${guild.id}`, snapshot.utility.aichat_muted_server);
+          restoredCount++;
+        }
+        if (snapshot.utility.server_context) {
+          this.utilDb.set(`server_context_${guild.id}`, snapshot.utility.server_context);
+          this.serverContextCache.set(guild.id, snapshot.utility.server_context);
           restoredCount++;
         }
         if (snapshot.utility.bump_cfg) {
@@ -490,6 +553,213 @@ class BotMemoryModule {
 
   getDirectivesList(guildId) {
     return this.guildDirectives.get(guildId) || [];
+  }
+
+  /**
+   * Retrieves cached or stored server knowledge manifest
+   */
+  getServerContext(guildId) {
+    if (this.serverContextCache.has(guildId)) {
+      return this.serverContextCache.get(guildId);
+    }
+    const saved = this.utilDb.get(`server_context_${guildId}`);
+    if (saved) {
+      this.serverContextCache.set(guildId, saved);
+      return saved;
+    }
+    return '';
+  }
+
+  /**
+   * Programmatically adds a directive, posts to #bot-rules, acknowledges with 🧠 and backs up state
+   */
+  async addDirective(guild, directiveText, author = null) {
+    try {
+      const rulesChan = await this.getRulesChannel(guild);
+      let sentMsg = null;
+      if (rulesChan) {
+        const authorLabel = author ? (author.tag || author.username || author.displayName || 'Admin') : 'Admin';
+        sentMsg = await rulesChan.send({
+          content: `📌 **Directive [from ${authorLabel}]:** ${directiveText}`
+        }).catch(() => null);
+
+        if (sentMsg && typeof sentMsg.react === 'function') {
+          await sentMsg.react('🧠').catch(() => {});
+        }
+      }
+
+      // Add to cached list
+      const list = this.guildDirectives.get(guild.id) || [];
+      list.push(directiveText);
+      this.guildDirectives.set(guild.id, list);
+
+      // Trigger state backup to memory vault
+      await this.backupState(guild);
+      return { success: true, channelId: rulesChan ? rulesChan.id : null, messageId: sentMsg ? sentMsg.id : null };
+    } catch (err) {
+      console.error('[BOT MEMORY ADD DIRECTIVE ERROR]', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Logs a directive update/unmute event to #bot-rules
+   */
+  async logDirectiveEvent(guild, eventText, author = null) {
+    try {
+      const rulesChan = await this.getRulesChannel(guild);
+      if (rulesChan) {
+        const authorLabel = author ? (author.tag || author.username || author.displayName || 'Admin') : 'Admin';
+        const msg = await rulesChan.send({
+          content: `⚡ **Directive Update [from ${authorLabel}]:** ${eventText}`
+        }).catch(() => null);
+        if (msg && typeof msg.react === 'function') {
+          await msg.react('🔊').catch(() => {});
+        }
+      }
+      await this.backupState(guild);
+    } catch (e) {}
+  }
+
+  /**
+   * Deep-scans the entire server: channels, categories, guidelines, roles, topics
+   * Stores context in DB, RAM, and uploads Server Manifest to #bot-memory
+   */
+  async scanServer(guild, initiatedBy = null) {
+    if (!guild) return { success: false, error: 'Guild unavailable' };
+    try {
+      // 1. Ensure private memory vault channels exist
+      const memChan = await this.ensureMemoryChannel(guild);
+      const rulesChan = await this.ensureRulesChannel(guild);
+
+      // 2. Fetch all channels & categories
+      let channels = guild.channels.cache ? Array.from(guild.channels.cache.values()) : [];
+      if (guild.channels.fetch) {
+        const fetched = await guild.channels.fetch().catch(() => null);
+        if (fetched) channels = Array.from(fetched.values());
+      }
+
+      const categories = channels.filter(c => c && c.type === ChannelType.GuildCategory);
+      const textChannels = channels.filter(c => c && (c.type === ChannelType.GuildText || c.type === ChannelType.GuildAnnouncement));
+      const voiceChannels = channels.filter(c => c && (c.type === ChannelType.GuildVoice || c.type === ChannelType.GuildStageVoice));
+
+      // 3. Extract rules and server guidelines
+      const ruleChannelCandidates = textChannels.filter(c =>
+        c && /rules|guidelines|welcome-hub|about|info|faq|community-rules/i.test(c.name)
+      );
+
+      const extractedRules = [];
+      for (const rc of ruleChannelCandidates) {
+        if (rc.messages && rc.messages.fetch) {
+          try {
+            const msgs = await rc.messages.fetch({ limit: 10 }).catch(() => null);
+            if (msgs && msgs.size > 0) {
+              const ruleTexts = Array.from(msgs.values())
+                .reverse()
+                .filter(m => m.content && m.content.trim() && !m.author?.bot)
+                .map(m => `[#${rc.name}] ${m.content.trim()}`);
+              extractedRules.push(...ruleTexts);
+            }
+          } catch (e) {}
+        }
+      }
+
+      // 4. Extract roles
+      let roles = guild.roles.cache ? Array.from(guild.roles.cache.values()) : [];
+      if (guild.roles.fetch) {
+        const fetchedRoles = await guild.roles.fetch().catch(() => null);
+        if (fetchedRoles) roles = Array.from(fetchedRoles.values());
+      }
+      const sortedRoles = roles
+        .filter(r => r.name !== '@everyone')
+        .sort((a, b) => b.position - a.position)
+        .slice(0, 20)
+        .map(r => r.name);
+
+      // 5. Build Channel Structure Map
+      const channelStructure = [];
+      for (const cat of categories) {
+        const childChannels = textChannels.filter(c => c.parentId === cat.id);
+        const childrenSummary = childChannels.map(c => `  - #${c.name}${c.topic ? ` (${c.topic})` : ''}`).join('\n');
+        channelStructure.push(`### Category: ${cat.name}\n${childrenSummary || '  (No text channels)'}`);
+      }
+      const uncategorized = textChannels.filter(c => !c.parentId);
+      if (uncategorized.length > 0) {
+        const uncatSummary = uncategorized.map(c => `  - #${c.name}${c.topic ? ` (${c.topic})` : ''}`).join('\n');
+        channelStructure.push(`### Uncategorized Channels:\n${uncatSummary}`);
+      }
+
+      // 6. Build Comprehensive Server Knowledge Manifest
+      const manifest = [
+        `# SERVER KNOWLEDGE BASE & AUDIT: ${guild.name.toUpperCase()}`,
+        `• Server ID: ${guild.id}`,
+        `• Member Count: ${guild.memberCount || 'Unknown'}`,
+        `• Owner ID: ${guild.ownerId || 'Unknown'}`,
+        `• Scanned At: ${new Date().toISOString()}`,
+        `• Initiated By: ${initiatedBy ? (initiatedBy.tag || initiatedBy.username || 'System') : 'Auto-Boot'}`,
+        '',
+        '## 1. SERVER ARCHITECTURE & CHANNELS',
+        channelStructure.join('\n\n') || '(Default layout)',
+        '',
+        '## 2. VOICE & MEDIA CHANNELS',
+        voiceChannels.map(v => `- 🔊 ${v.name}`).join('\n') || 'None',
+        '',
+        '## 3. KEY ROLES & HIERARCHY',
+        sortedRoles.join(', ') || 'Default roles',
+        '',
+        '## 4. SERVER GUIDELINES & EXTRACTED RULES',
+        extractedRules.length > 0
+          ? extractedRules.slice(0, 10).map((r, i) => `${i + 1}. ${r}`).join('\n')
+          : 'Standard community guidelines apply (Respect members, no spam, keep topics relevant).',
+        '',
+        '## 5. ACTIVE BOT CHANNELS',
+        `• Memory Vault: ${memChan ? `#${memChan.name} (${memChan.id})` : 'Not bound'}`,
+        `• Directives Desk: ${rulesChan ? `#${rulesChan.name} (${rulesChan.id})` : 'Not bound'}`
+      ].join('\n');
+
+      // 7. Save to DB & RAM Cache
+      this.utilDb.set(`server_context_${guild.id}`, manifest);
+      this.serverContextCache.set(guild.id, manifest);
+
+      // 8. Upload Manifest and Embed to #bot-memory
+      if (memChan) {
+        const manifestBuffer = Buffer.from(manifest, 'utf-8');
+        const manifestAttachment = new AttachmentBuilder(manifestBuffer, { name: `server_manifest_${guild.id}.md` });
+        const scanEmbed = new EmbedBuilder()
+          .setColor(0x5865F2)
+          .setTitle('🌐 Comprehensive Server Knowledge Base Updated')
+          .setDescription(
+            `EditX AI has completed a full deep-scan of **${guild.name}**.\n\n` +
+            `• **Text/Announce Channels:** \`${textChannels.length}\`\n` +
+            `• **Categories Mapped:** \`${categories.length}\`\n` +
+            `• **Voice Channels:** \`${voiceChannels.length}\`\n` +
+            `• **Server Rules Extracted:** \`${extractedRules.length}\`\n` +
+            `• **Key Roles Synced:** \`${sortedRoles.length}\``
+          )
+          .setFooter({ text: 'EditX Autonomous Autopilot • Server Context Synced' })
+          .setTimestamp();
+
+        await memChan.send({
+          content: `🧠 **SERVER_SCAN_COMPLETE** • Analyzed ${channels.length} channels & server structure`,
+          embeds: [scanEmbed],
+          files: [manifestAttachment]
+        }).catch(err => console.warn('[BOT MEMORY SCAN UPLOAD ERROR]', err.message));
+      }
+
+      console.log(`[BOT SCAN] Deep server scan complete for ${guild.name}: ${channels.length} channels analyzed.`);
+      return {
+        success: true,
+        channelCount: channels.length,
+        textCount: textChannels.length,
+        categoryCount: categories.length,
+        roleCount: sortedRoles.length,
+        rulesFound: extractedRules.length,
+        manifest
+      };
+    } catch (err) {
+      console.error('[BOT SCAN ERROR]', err);
+      return { success: false, error: err.message };
+    }
   }
 
   async runScheduledBackups() {

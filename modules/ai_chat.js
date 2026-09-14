@@ -182,7 +182,7 @@ class AIChatModule {
     }
 
     // 2. If message has broad role pings (@everyone, @here, @Staff, etc.), ignore
-    if (message.mentions.everyone || message.mentions.roles.size > 0) {
+    if (message.mentions?.everyone || (message.mentions?.roles && message.mentions.roles.size > 0)) {
       return false;
     }
 
@@ -203,10 +203,11 @@ class AIChatModule {
     const textWithoutMentions = prompt.replace(/<@!?[0-9]+>|<@&[0-9]+>|<#[0-9]+>/g, '').trim();
     const lower = textWithoutMentions.toLowerCase();
 
-    // Check if channel is currently muted for AI chat
+    // Check if channel or server is currently muted for AI chat
     const mutedKey = `aichat_muted_${guildId}`;
     let mutedChannels = this.db.get(mutedKey) || [];
     const isChannelMuted = mutedChannels.includes(message.channel.id);
+    const isServerMuted = Boolean(this.db.get(`aichat_muted_server_${guildId}`));
 
     // Permission helper: Allow staff, managers, administrators, and server owner
     const canManageAI = message.member?.permissions?.has(PermissionFlagsBits.ManageMessages) ||
@@ -214,8 +215,8 @@ class AIChatModule {
                         message.member?.permissions?.has(PermissionFlagsBits.Administrator) ||
                         message.author.id === message.guild.ownerId;
 
-    // A. Check for UNMUTE / TOGGLE ON command (e.g. "@EditX you can reply in this channel", "@EditX start replying here", "@EditX resume here", "@EditX unmute here")
-    const isUnmuteRequest = /\b(you\s+can\s+reply|start\s+replying|resume|unmute|talk\s+again|reply\s+again)\b/i.test(lower);
+    // A. Check for UNMUTE / TOGGLE ON command (e.g. "@EditX you can reply in this channel/server", "@EditX start replying here", "@EditX resume here", "@EditX unmute here")
+    const isUnmuteRequest = /\b(you\s+can\s+reply|start\s+replying|resume|unmute|talk\s+again|reply\s+again|start\s+talking|send\s+messages?\s+again)\b/i.test(lower);
     if (isUnmuteRequest && isMentioned) {
       if (!canManageAI) {
         return message.reply({
@@ -223,38 +224,126 @@ class AIChatModule {
           allowedMentions: { repliedUser: false }
         }).catch(() => {});
       }
+
+      if (typeof message.react === 'function') {
+        await message.react('🧠').catch(() => {});
+        await message.react('🔊').catch(() => {});
+      }
+
+      const isServerScope = /\b(server|server\s*wide|across\s+the\s+server|everywhere|all\s+channels)\b/i.test(lower);
+      if (isServerScope || isServerMuted) {
+        this.db.set(`aichat_muted_server_${guildId}`, false);
+        if (this.botMemory) {
+          await this.botMemory.logDirectiveEvent(message.guild, `Server-wide AI replies unmuted & resumed by ${message.author.tag || message.author.username}.`, message.author);
+        }
+        await message.reply({
+          content: `🔊 🧠 **Server-Wide AI Replies Resumed!**\nI am now active and will reply across the server again. Recorded in rulebook and memory vault.`,
+          allowedMentions: { repliedUser: false }
+        }).catch(() => {});
+        return true;
+      }
+
       if (isChannelMuted) {
         mutedChannels = mutedChannels.filter(id => id !== message.channel.id);
         this.db.set(mutedKey, mutedChannels);
       }
-      return message.reply({
-        content: `🔊 **AI Replies Resumed**: I am now active and will reply in <#${message.channel.id}> again!`,
+      if (this.botMemory) {
+        await this.botMemory.logDirectiveEvent(message.guild, `AI replies unmuted in #${message.channel.name}.`, message.author);
+      }
+      await message.reply({
+        content: `🔊 🧠 **AI Replies Resumed**: I am now active and will reply in <#${message.channel.id}> again!`,
         allowedMentions: { repliedUser: false }
       }).catch(() => {});
+      return true;
     }
 
-    // B. Check for MUTE / TOGGLE OFF command (e.g. "@EditX dont reply in this channel", "@EditX stop replying here", "@EditX stay quiet here", "@EditX be quiet in this channel", "@EditX mute here")
-    const isMuteRequest = /\b(don'?t\s+reply|stop\s+replying|stay\s+quiet|be\s+quiet|mute|don'?t\s+talk|shut\s*up)\s*(in\s+this\s+channel|here|now)?\b/i.test(lower) ||
-                          /\b(don'?t\s+reply\s+in\s+this\s+channel|stop\s+talking\s+here)\b/i.test(lower);
+    // B. Check for MUTE / TOGGLE OFF / SILENCE command (e.g. "@EditX don't send any kind of msg in this server", "@EditX dont reply in this channel", "@EditX be quiet here")
+    const isMuteRequest = /\b(don'?t|do\s+not|stop|no|never|not)\s+(send\s+(any\s+(kind\s+of\s+)?|all\s+)?(msg|messages?)|replying|reply|talk(ing)?|chat(ting)?|messaging)\b/i.test(lower) ||
+                          /\b(stay\s+quiet|be\s+quiet|shut\s*up|mute|silence)\b/i.test(lower);
     if (isMuteRequest && isMentioned) {
       if (!canManageAI) {
-        return message.reply({
+        await message.reply({
           content: '⚠️ Only server moderators or administrators can toggle AI replies.',
           allowedMentions: { repliedUser: false }
         }).catch(() => {});
+        return true;
       }
+
+      if (typeof message.react === 'function') {
+        await message.react('🧠').catch(() => {});
+        await message.react('🤐').catch(() => {});
+      }
+
+      const isServerScope = /\b(server|server\s*wide|across\s+the\s+server|everywhere|all\s+channels)\b/i.test(lower);
+      const rulesChan = this.botMemory ? await this.botMemory.getRulesChannel(message.guild) : null;
+      const memChan = this.botMemory ? await this.botMemory.getMemoryChannel(message.guild) : null;
+
+      if (isServerScope) {
+        this.db.set(`aichat_muted_server_${guildId}`, true);
+        const directiveText = `Do not send any messages anywhere in this server (Server-wide silence commanded by ${message.author.tag || message.author.username}).`;
+        if (this.botMemory) {
+          await this.botMemory.addDirective(message.guild, directiveText, message.author);
+        }
+        await message.reply({
+          content: `🤐 🧠 **Server-Wide AI Replies Muted & Directive Saved!**\n` +
+                   `I will not send any messages anywhere in this server.\n` +
+                   `• **Rule Recorded In:** ${rulesChan ? `<#${rulesChan.id}>` : '`#bot-rules`'}\n` +
+                   `• **State Vault:** ${memChan ? `<#${memChan.id}>` : '`#bot-memory`'}\n` +
+                   `• To reverse, ping me and say \`you can reply in this server\` or use \`/aiconfig unmute\`.`,
+          allowedMentions: { repliedUser: false }
+        }).catch(() => {});
+        return true;
+      }
+
+      // Channel-specific mute
       if (!isChannelMuted) {
         mutedChannels.push(message.channel.id);
         this.db.set(mutedKey, mutedChannels);
       }
-      return message.reply({
-        content: `🤐 **Quiet Mode Activated**: I will keep quiet and won't reply in <#${message.channel.id}>. Ping me and say \`you can reply in this channel\` whenever you want me back!`,
+      const directiveText = `Do not send messages or reply in #${message.channel.name}.`;
+      if (this.botMemory) {
+        await this.botMemory.addDirective(message.guild, directiveText, message.author);
+      }
+      await message.reply({
+        content: `🤐 🧠 **Quiet Mode Activated & Directive Saved!**\n` +
+                 `I will keep quiet and won't reply in <#${message.channel.id}>.\n` +
+                 `• **Rule Recorded In:** ${rulesChan ? `<#${rulesChan.id}>` : '`#bot-rules`'}\n` +
+                 `• **State Vault:** ${memChan ? `<#${memChan.id}>` : '`#bot-memory`'}\n` +
+                 `• To resume, ping me and say \`you can reply in this channel\` or use \`/aiconfig unmute\`.`,
         allowedMentions: { repliedUser: false }
       }).catch(() => {});
+      return true;
     }
 
-    // C. If this channel is muted, stay completely quiet!
-    if (isChannelMuted) {
+    // C. Check for GENERAL DIRECTIVE / RULE via mention (e.g. "@EditX rule: always be concise", "@EditX remember: never mention prices")
+    const ruleDirectiveMatch = /^(rule|directive|remember|instruction|set\s+rule|new\s+rule)\s*:\s*(.+)/i.exec(textWithoutMentions) ||
+                               /^(from\s+now\s+on|always|never)\s+(.+)/i.exec(textWithoutMentions);
+    if (ruleDirectiveMatch && isMentioned && canManageAI) {
+      const extractedDirective = (ruleDirectiveMatch[2] || textWithoutMentions).trim();
+      if (typeof message.react === 'function') {
+        await message.react('🧠').catch(() => {});
+      }
+
+      const rulesChan = this.botMemory ? await this.botMemory.getRulesChannel(message.guild) : null;
+      const memChan = this.botMemory ? await this.botMemory.getMemoryChannel(message.guild) : null;
+
+      if (this.botMemory) {
+        await this.botMemory.addDirective(message.guild, extractedDirective, message.author);
+      }
+
+      await message.reply({
+        content: `🧠 **Directive Learned & Saved to Memory!**\n` +
+                 `• **Rule:** "${extractedDirective}"\n` +
+                 `• **Rulebook:** ${rulesChan ? `<#${rulesChan.id}>` : '`#bot-rules`'}\n` +
+                 `• **Memory Vault:** ${memChan ? `<#${memChan.id}>` : '`#bot-memory`'}\n` +
+                 `I will actively obey this instruction in all future responses.`,
+        allowedMentions: { repliedUser: false }
+      }).catch(() => {});
+      return true;
+    }
+
+    // D. If server or channel is muted, stay completely quiet!
+    if (isServerMuted || isChannelMuted) {
       return false;
     }
 
@@ -274,7 +363,9 @@ class AIChatModule {
 
     // Quick courteous reaction for short acknowledgments ("thanks", "ok", "cool")
     if (/^(thanks|thank you|thx|ty|tyvm|appreciate it|ok|okay|cool|nice|np|got it)\b/i.test(lower)) {
-      await message.react('❤️').catch(() => {});
+      if (typeof message.react === 'function') {
+        await message.react('❤️').catch(() => {});
+      }
       return true;
     }
 
@@ -330,8 +421,13 @@ class AIChatModule {
       ? `\n\nOWNER & ADMIN CUSTOM RULES (STRICT LIVE DIRECTIVES FROM #bot-rules):\n${customDirectives}\n(You MUST obey all custom rules above unconditionally.)`
       : '';
 
+    const serverContext = this.botMemory && context.guildId ? this.botMemory.getServerContext(context.guildId) : '';
+    const serverContextSection = serverContext
+      ? `\n\nSERVER KNOWLEDGE & ARCHITECTURE (SCANNED):\n${serverContext.slice(0, 1500)}\n`
+      : '';
+
     const systemPrompt = `You are EditX AI, a chill, friendly, and concise Discord assistant for the EditX Community (${context.guildName || 'EditX Server'}).
-User: ${context.userName || 'Member'}
+User: ${context.userName || 'Member'}${serverContextSection}
 
 CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
 1. CASUAL CHAT & SMALL TALK (STRICT):
