@@ -202,7 +202,7 @@ ${cleanText}
       } catch (gemErr) {}
     }
 
-    // 3. Groq Compound Fallback
+    // 3. Groq Fast Fallback (qwen/qwen3.8-27b)
     if (this.groqKey) {
       try {
         const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -212,11 +212,11 @@ ${cleanText}
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'groq/compound',
+            model: 'qwen/qwen3.8-27b',
             messages: [
               {
                 role: 'system',
-                content: 'Translate non-English Discord messages to English. Return JSON: {"isEnglish": bool, "sourceLanguage": string, "translatedText": string}'
+                content: 'Translate non-English Discord messages to English. Respond in strictly valid JSON: {"isEnglish": false, "sourceLanguage": "Spanish", "translatedText": "translation"}'
               },
               {
                 role: 'user',
