@@ -208,29 +208,33 @@ class MusicModule {
     try {
       const stream = await play.stream(song.url);
       const resource = createAudioResource(stream.stream, { inputType: stream.type });
-      const player = createAudioPlayer({
-        behaviors: { noSubscriber: NoSubscriberBehavior.Play }
-      });
+      let player = serverQueue.player;
+      if (!player) {
+        player = createAudioPlayer({
+          behaviors: { noSubscriber: NoSubscriberBehavior.Play }
+        });
+        serverQueue.connection.subscribe(player);
+        serverQueue.player = player;
+
+        player.on(AudioPlayerStatus.Idle, () => {
+          const sq = this.queues.get(guildId);
+          if (!sq) return;
+          sq.songs.shift();
+          this.playSong(guildId, sq.songs[0]);
+        });
+
+        player.on('error', error => {
+          console.error('[AUDIO PLAYER ERROR]', error);
+          const sq = this.queues.get(guildId);
+          if (!sq) return;
+          const curSong = sq.songs[0];
+          sq.textChannel?.send(`❌ Playback error on **${curSong?.title || 'current track'}**. Skipping...`).catch(() => {});
+          sq.songs.shift();
+          this.playSong(guildId, sq.songs[0]);
+        });
+      }
 
       player.play(resource);
-      serverQueue.connection.subscribe(player);
-      serverQueue.player = player;
-
-      player.on(AudioPlayerStatus.Idle, () => {
-        const sq = this.queues.get(guildId);
-        if (!sq) return;
-        sq.songs.shift();
-        this.playSong(guildId, sq.songs[0]);
-      });
-
-      player.on('error', error => {
-        console.error('[AUDIO PLAYER ERROR]', error);
-        const sq = this.queues.get(guildId);
-        if (!sq) return;
-        sq.textChannel.send(`❌ Playback error on **${song.title}**. Skipping...`).catch(() => {});
-        sq.songs.shift();
-        this.playSong(guildId, sq.songs[0]);
-      });
 
       const embed = new EmbedBuilder().setColor(0x57F287)
         .setTitle('🎶 Now Playing')

@@ -299,15 +299,9 @@ client.on(Events.MessageCreate, async (message) => {
   leveling.handleChatXP(message);
 });
 
-// Message Deletion Handlers (Ghost-Ping Catcher + Audit Logger)
+// Message Deletion Handlers (Ghost-Ping Catcher; Audit Logger handled via LoggingModule event registration)
 client.on(Events.MessageDelete, async (message) => {
   await housekeeper.handleMessageDelete(message);
-  await logging.handleMessageDelete(message);
-});
-
-// Message Update Handlers (Audit Logger)
-client.on(Events.MessageUpdate, async (oldMsg, newMsg) => {
-  await logging.handleMessageUpdate(oldMsg, newMsg);
 });
 
 // Unified Interaction Router (Commands, Buttons, Menus, Modals)

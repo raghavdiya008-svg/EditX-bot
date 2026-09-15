@@ -182,8 +182,10 @@ class SocialAlertsModule {
           customMessage
         });
 
-        this.db.set(twKey, filtered);
-        return interaction.reply({ content: `✅ Added Twitch notification for **${streamer}** in <#${discordChannel.id}>.`, ephemeral: true });
+        const note = (!process.env.TWITCH_CLIENT_ID || !process.env.TWITCH_CLIENT_SECRET)
+          ? '\n\n*(Note: Live stream polling requires `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` in your environment config).*'
+          : '';
+        return interaction.reply({ content: `✅ Added Twitch notification for **${streamer}** in <#${discordChannel.id}>.${note}`, ephemeral: true });
       }
 
       if (sub === 'remove') {
@@ -342,7 +344,76 @@ class SocialAlertsModule {
         }
         if (updated) this.db.set(key, alerts);
       }
+
+      // 4. Twitch Live Streamers
+      if (key.startsWith('twitch_') && Array.isArray(alerts) && alerts.length > 0) {
+        const clientId = process.env.TWITCH_CLIENT_ID;
+        const clientSecret = process.env.TWITCH_CLIENT_SECRET;
+        if (clientId && clientSecret) {
+          try {
+            await this.checkTwitchStreams(key, alerts, clientId, clientSecret);
+          } catch (tErr) {
+            console.warn('[TWITCH POLLING WARNING]', tErr.message);
+          }
+        }
+      }
     }
+  }
+
+  async checkTwitchStreams(key, alerts, clientId, clientSecret) {
+    // 1. Get Twitch App Access Token
+    if (!this.twitchToken || Date.now() > this.twitchTokenExpiry) {
+      const tokenRes = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`, { method: 'POST' });
+      if (!tokenRes.ok) return;
+      const tokenData = await tokenRes.json();
+      this.twitchToken = tokenData.access_token;
+      this.twitchTokenExpiry = Date.now() + ((tokenData.expires_in || 3600) - 60) * 1000;
+    }
+
+    const streamerLogins = alerts.map(a => `user_login=${encodeURIComponent(a.streamer)}`).join('&');
+    if (!streamerLogins) return;
+
+    const streamsRes = await fetch(`https://api.twitch.tv/helix/streams?${streamerLogins}`, {
+      headers: {
+        'Client-ID': clientId,
+        'Authorization': `Bearer ${this.twitchToken}`
+      }
+    });
+
+    if (!streamsRes.ok) return;
+    const streamsData = await streamsRes.json();
+    const liveStreams = new Map((streamsData.data || []).map(s => [s.user_login.toLowerCase(), s]));
+
+    let updated = false;
+    for (const alert of alerts) {
+      const streamerKey = alert.streamer.toLowerCase();
+      const liveInfo = liveStreams.get(streamerKey);
+      if (liveInfo) {
+        const streamId = liveInfo.id;
+        if (alert.lastStreamId !== streamId) {
+          alert.lastStreamId = streamId;
+          updated = true;
+
+          const chan = await this.client.channels.fetch(alert.discordChannelId).catch(() => null);
+          if (chan) {
+            const embed = new EmbedBuilder()
+              .setColor(0x9146FF)
+              .setTitle(`🟣 ${liveInfo.user_name} is now LIVE on Twitch!`)
+              .setURL(`https://twitch.tv/${liveInfo.user_login}`)
+              .setDescription(`**${liveInfo.title || 'Live Stream'}**\nPlaying: **${liveInfo.game_name || 'Just Chatting'}**`)
+              .setThumbnail(`https://static-cdn.jtvnw.net/previews-ttv/live_user_${liveInfo.user_login}-320x180.jpg`)
+              .setFooter({ text: 'Twitch Live Notification' })
+              .setTimestamp();
+
+            const customText = (alert.customMessage || '🟣 **{streamer}** is now LIVE on Twitch!\nhttps://twitch.tv/{streamer}')
+              .replace(/\{streamer\}/gi, liveInfo.user_name);
+
+            await chan.send({ content: customText, embeds: [embed] }).catch(() => {});
+          }
+        }
+      }
+    }
+    if (updated) this.db.set(key, alerts);
   }
 }
 

@@ -147,14 +147,35 @@ class TicketsModule {
       }
 
       try {
+        const staffRoles = interaction.guild.roles?.cache
+          ? Array.from(interaction.guild.roles.cache.values()).filter(r =>
+              r && !r.managed &&
+              r.id !== interaction.guild.roles.everyone.id &&
+              (r.permissions?.has(PermissionFlagsBits.ManageChannels) ||
+               r.permissions?.has(PermissionFlagsBits.ManageMessages) ||
+               r.permissions?.has(PermissionFlagsBits.ModerateMembers) ||
+               r.permissions?.has(PermissionFlagsBits.Administrator) ||
+               /^(staff|support|mod|moderator|admin|administrator|ticket\s*support)\b/i.test(r.name))
+            )
+          : [];
+
+        const permissionOverwrites = [
+          { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] },
+          { id: this.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles] }
+        ];
+
+        staffRoles.forEach(r => {
+          permissionOverwrites.push({
+            id: r.id,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks]
+          });
+        });
+
         const ticketChan = await interaction.guild.channels.create({
           name: channelName,
           type: ChannelType.GuildText,
-          permissionOverwrites: [
-            { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] },
-            { id: this.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles] }
-          ]
+          permissionOverwrites
         });
 
         this.db.set(ticketChan.id, {

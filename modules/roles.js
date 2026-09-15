@@ -159,7 +159,10 @@ class RolesModule {
       if (sub === 'unique') {
         const rawTitle = options.getString('title') || 'Unique Role Selection (Single Choice)';
         const title = rawTitle.replace(/^🎭[・\s]*/, '');
-        const roleIds = roles.map(r => r.role.id).join(',');
+        // Short unique group ID to avoid exceeding Discord's 100-character custom_id limit
+        const groupId = 'g_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        this.rolesDb.set(groupId, roles.map(r => r.role.id));
+
         const embed = new EmbedBuilder().setColor(0x2B2D31)
           .setTitle(`🎭・${title}`)
           .setDescription(
@@ -182,7 +185,7 @@ class RolesModule {
         roles.forEach(r => {
           row.addComponents(
             new ButtonBuilder()
-              .setCustomId(`btn_uniq_${r.role.id}_grp_${roleIds}`)
+              .setCustomId(`btn_uniq_${r.role.id}_grp_${groupId}`)
               .setLabel(r.label)
               .setEmoji('🔘')
               .setStyle(ButtonStyle.Secondary)
@@ -325,7 +328,14 @@ class RolesModule {
         if (typeof interaction.deferReply === 'function') await interaction.deferReply({ ephemeral: true }).catch(() => {});
         const parts = interaction.customId.split('_grp_');
         const roleId = parts[0].replace('btn_uniq_', '');
-        const allGroupIds = parts[1].split(',');
+        let allGroupIds = [];
+        if (parts[1]) {
+          if (parts[1].startsWith('g_')) {
+            allGroupIds = this.rolesDb.get(parts[1]) || [];
+          } else {
+            allGroupIds = parts[1].split(',');
+          }
+        }
 
         const targetRole = interaction.guild.roles.cache.get(roleId);
         if (!targetRole) return sendResponse('❌ Role no longer exists.');

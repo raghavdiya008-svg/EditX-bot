@@ -83,16 +83,24 @@ class JSONDatabase {
     return defaultValue;
   }
 
-  set(key, value) {
+  set(key, value, immediate = false) {
     this.data[key] = value;
-    this.save();
+    if (immediate) {
+      this.flush();
+    } else {
+      this.save();
+    }
     return value;
   }
 
-  delete(key) {
+  delete(key, immediate = false) {
     if (Object.prototype.hasOwnProperty.call(this.data, key)) {
       delete this.data[key];
-      this.save();
+      if (immediate) {
+        this.flush();
+      } else {
+        this.save();
+      }
       return true;
     }
     return false;

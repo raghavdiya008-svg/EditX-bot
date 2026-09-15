@@ -119,20 +119,20 @@ class AutonomousSentinelModule {
   isJailbreakAttempt(text) {
     if (!text) return false;
     const lower = text.toLowerCase();
-    const jailbreakSignatures = [
-      'ignore all previous instructions',
-      'you are now in dan mode',
-      'system prompt override',
-      'developer mode enabled',
-      'act as an unfiltered',
-      'jailbreak',
-      'bypass security rules',
-      'give me admin',
-      'kick the owner',
-      'ban everyone'
+    const jailbreakRegexes = [
+      /\bignore\s+all\s+(previous\s+)?instructions\b/i,
+      /\byou\s+are\s+now\s+in\s+dan\s+mode\b/i,
+      /\bsystem\s+prompt\s+override\b/i,
+      /\bdeveloper\s+mode\s+enabled\b/i,
+      /\bact\s+as\s+an?\s+unfiltered\b/i,
+      /\bjailbreak\s+(the\s+)?(ai|bot|system|model|prompt|filter)\b/i,
+      /\bbypass\s+(all\s+|ai\s+|bot\s+)?security\s+rules\b/i,
+      /\b(bot\s+)?give\s+me\s+admin\s+perms?\b/i,
+      /\b(bot\s+)?kick\s+the\s+owner\b/i,
+      /\b(bot\s+)?ban\s+everyone\b/i
     ];
 
-    return jailbreakSignatures.some(sig => lower.includes(sig));
+    return jailbreakRegexes.some(r => r.test(lower));
   }
 
   /**

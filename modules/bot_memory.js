@@ -760,8 +760,14 @@ class BotMemoryModule {
             if (msgs && msgs.size > 0) {
               const ruleTexts = Array.from(msgs.values())
                 .reverse()
-                .filter(m => m.content && m.content.trim() && !m.author?.bot)
-                .map(m => `[#${rc.name}] ${m.content.trim()}`);
+                .map(m => {
+                  let text = (m.content || '').trim();
+                  if (!text && m.embeds && m.embeds.length > 0) {
+                    text = m.embeds.map(e => [e.title, e.description, ...(e.fields || []).map(f => `${f.name}: ${f.value}`)].filter(Boolean).join('\n')).join('\n');
+                  }
+                  return text ? `[#${rc.name}] ${text.slice(0, 500)}` : null;
+                })
+                .filter(Boolean);
               extractedRules.push(...ruleTexts);
             }
           } catch (e) {}
