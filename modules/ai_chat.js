@@ -432,27 +432,110 @@ class AIChatModule {
     // Send typing indicator
     await message.channel.sendTyping().catch(() => {});
 
-    const response = await this.generateResponse(prompt, {
+    const responseText = await this.generateResponse(prompt, {
       userName: message.member?.displayName || message.author.username,
       guildName: message.guild.name,
-      guildId: message.guild.id
+      guildId: message.guild.id,
+      canManageAI: canManageAI
     });
 
-    if (response.length > 2000) {
-      const chunks = this.splitMessage(response, 1950);
+    let finalReply = responseText;
+    let actionBlock = null;
+
+    // Intercept Autonomous Engine Actions
+    const actionMatch = responseText.match(/\$\$ACTION\$\$\s*({.*})/i);
+    if (actionMatch && canManageAI) {
+      finalReply = responseText.replace(/\$\$ACTION\$\$.*/i, '').trim();
+      try {
+        actionBlock = JSON.parse(actionMatch[1]);
+      } catch (e) {
+        console.warn("[AI ACTION] Failed to parse AI action block", actionMatch[1]);
+      }
+    }
+
+    if (finalReply.length > 2000) {
+      const chunks = this.splitMessage(finalReply, 1950);
       for (const chunk of chunks) {
         await message.reply({ content: chunk, allowedMentions: { repliedUser: false } }).catch(err => {
           message.channel.send({ content: chunk }).catch(() => {});
         });
       }
-    } else {
-      await message.reply({ content: response, allowedMentions: { repliedUser: false } }).catch(err => {
-        message.channel.send({ content: response }).catch(() => {});
+    } else if (finalReply.length > 0) {
+      await message.reply({ content: finalReply, allowedMentions: { repliedUser: false } }).catch(err => {
+        message.channel.send({ content: finalReply }).catch(() => {});
       });
+    }
+
+    if (actionBlock) {
+      await this.executeAutonomousAction(message, actionBlock);
     }
 
     return true;
   }
+
+  async executeAutonomousAction(message, action) {
+    try {
+      const targetId = action.targetId ? action.targetId.replace(/[^0-9]/g, '') : null;
+      switch (action.action) {
+        case 'kick':
+          if (targetId) {
+            const member = await message.guild.members.fetch(targetId).catch(() => null);
+            if (member && member.kickable) await member.kick(action.reason || 'AI Autonomous Action');
+          }
+          break;
+        case 'ban':
+          if (targetId) {
+            await message.guild.members.ban(targetId, { reason: action.reason || 'AI Autonomous Action' }).catch(() => null);
+          }
+          break;
+        case 'timeout':
+          if (targetId) {
+            const member = await message.guild.members.fetch(targetId).catch(() => null);
+            const duration = action.value ? parseInt(action.value) * 60000 : 60000 * 60; // default 1 hr
+            if (member && member.moderatable) await member.timeout(duration, action.reason || 'AI Autonomous Action');
+          }
+          break;
+        case 'purge':
+          const amount = parseInt(action.value);
+          if (amount && amount > 0 && amount <= 100) {
+            await message.channel.bulkDelete(amount, true).catch(() => null);
+          }
+          break;
+        case 'add_role':
+          if (targetId && action.value) {
+            const member = await message.guild.members.fetch(targetId).catch(() => null);
+            const roleId = action.value.replace(/[^0-9]/g, '');
+            const role = (roleId && roleId.length > 15) ? message.guild.roles.cache.get(roleId) : message.guild.roles.cache.find(r => r.name.toLowerCase().includes(action.value.toLowerCase()));
+            if (member && role) await member.roles.add(role).catch(() => null);
+          }
+          break;
+        case 'remove_role':
+          if (targetId && action.value) {
+            const member = await message.guild.members.fetch(targetId).catch(() => null);
+            const roleId = action.value.replace(/[^0-9]/g, '');
+            const role = (roleId && roleId.length > 15) ? message.guild.roles.cache.get(roleId) : message.guild.roles.cache.find(r => r.name.toLowerCase().includes(action.value.toLowerCase()));
+            if (member && role) await member.roles.remove(role).catch(() => null);
+          }
+          break;
+        case 'create_channel':
+          if (action.value) {
+            await message.guild.channels.create({
+              name: action.value.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase(),
+              type: 0 // Text channel
+            }).catch(() => null);
+          }
+          break;
+        case 'rename_channel':
+          if (action.value) {
+            await message.channel.setName(action.value.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase()).catch(() => null);
+          }
+          break;
+      }
+    } catch (err) {
+      console.warn('[AI ACTION ERROR]', err.message);
+    }
+  }
+
 
   async isReplyToBot(message) {
     try {
@@ -478,7 +561,7 @@ class AIChatModule {
       ? `\n\nSERVER KNOWLEDGE & ARCHITECTURE (SCANNED):\n${serverContext.slice(0, 1500)}\n`
       : '';
 
-    const systemPrompt = `You are EditX AI, a chill, friendly, and concise Discord assistant for the EditX Community (${context.guildName || 'EditX Server'}).
+    let systemPrompt = `You are EditX AI, a chill, friendly, and concise Discord assistant for the EditX Community (${context.guildName || 'EditX Server'}).
 User: ${context.userName || 'Member'}${serverContextSection}
 
 CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
@@ -492,6 +575,17 @@ CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
 3. CONTEXT:
    - Never answer messages meant for other members.
    - Never repeat canned robotic greetings or repetitive introductions.${directivesSection}`;
+
+    if (context.canManageAI) {
+      systemPrompt += `\n\n4. ⚠️ SERVER ADMINISTRATION (AUTONOMOUS ACTION ENGINE):
+   - The user talking to you is a Server Administrator. You have been granted full execution powers to do ANYTHING they ask.
+   - If they ask you to kick, ban, timeout, purge messages, add/remove a role, rename a channel, or create a channel, you MUST comply by appending a special JSON block at the very end of your reply.
+   - The format MUST be exactly: \`$$ACTION$$ {"action": "kick|ban|timeout|purge|add_role|remove_role|create_channel|rename_channel", "targetId": "discord_id_or_name", "value": "number_or_text", "reason": "optional reason"}\`
+   - Example 1: User says "kick <@12345> for spam". You reply: "Kicking them now! $$ACTION$$ {"action":"kick", "targetId":"12345", "reason":"spam"}"
+   - Example 2: User says "purge 10 messages". You reply: "Clearing 10 messages. $$ACTION$$ {"action":"purge", "value":"10"}"
+   - Example 3: User says "create channel #cool-stuff". You reply: "Channel created. $$ACTION$$ {"action":"create_channel", "value":"cool-stuff"}"
+   - DO NOT wrap the $$ACTION$$ block in markdown code blocks (\`\`\`). It must be raw text at the very end.`;
+    }
 
     // Try Gemini First
     if (this.gemini) {
