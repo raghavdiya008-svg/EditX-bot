@@ -225,35 +225,65 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
     const incidents = this.sentinel ? this.sentinel.getRecentIncidents(5) : [];
     const totalMembers = guild.memberCount || 1;
 
-    let incidentSummary = '✅ **Zero critical security incidents overnight.** Server operated quietly.';
+    let incidentSummary = '✅ **Zero critical security incidents.** Server operated quietly.';
     if (incidents.length > 0) {
       incidentSummary = incidents.map(i =>
         `• **[${i.category}]** ${i.action} on \`${i.user}\` in #${i.channel} (${i.confidence}% conf.)`
       ).join('\n');
     }
 
+    // Inspect recent activity in #modlogs or audit log
+    let recentLogSummary = '• No recent mod actions logged in the past 12 hours.';
+    try {
+      const chanList = guild.channels?.cache ? Array.from(guild.channels.cache.values()) : [];
+      const logChan = chanList.find(c =>
+        c && c.type === ChannelType.GuildText && (
+          c.name.includes('modlog') || c.name.includes('audit-log') || c.name === 'logs'
+        )
+      );
+      if (logChan && logChan.messages && typeof logChan.messages.fetch === 'function') {
+        const msgs = await logChan.messages.fetch({ limit: 15 }).catch(() => null);
+        if (msgs && msgs.size > 0) {
+          const twelveHoursAgo = Date.now() - (12 * 60 * 60 * 1000);
+          const recentLogs = Array.from(msgs.values())
+            .filter(m => m.createdTimestamp > twelveHoursAgo)
+            .slice(0, 5);
+
+          if (recentLogs.length > 0) {
+            recentLogSummary = recentLogs.map(m => {
+              const preview = m.embeds?.[0]?.title || m.embeds?.[0]?.description || m.content || 'Logged event';
+              return `• <t:${Math.floor(m.createdTimestamp / 1000)}:R> - ${preview.slice(0, 70)}`;
+            }).join('\n');
+          }
+        }
+      }
+    } catch (e) {}
+
     const embed = new EmbedBuilder()
       .setColor(0x5865F2)
       .setAuthor({
-        name: `☀️ Daily 9:00 AM Executive Briefing • ${guild.name}`,
+        name: `📊 Executive Server Briefing • ${guild.name}`,
         iconURL: guild.iconURL({ dynamic: true }) || undefined
       })
-      .setTitle('24/7 Autonomous Server Status Report')
+      .setTitle('24/7 Autonomous Server Status Report & 12-Hour Briefing')
       .setDescription(
-        `Good morning! Here is the overnight activity summary:\n\n` +
+        `Here is the latest 12-hour server activity and operational summary:\n\n` +
         `### 📊 Community Metrics\n` +
         `> 👥 **Total Members:** \`#${totalMembers}\`\n` +
         `> 🛡️ **Autonomous Guardian:** 🟢 \`Active (24/7 Auto-Pilot)\`\n\n` +
-        `### 🛡️ Overnight Security Actions\n` +
+        `### 🛡️ Security & Incident Activity\n` +
         `${incidentSummary}\n\n` +
-        `### ⚡ Quick Copilot Actions\n` +
-        `Use \`/copilot summarize\` or \`/copilot briefing\` anytime to inspect server status.`
+        `### 📋 Recent Logged Events (Last 12h)\n` +
+        `${recentLogSummary}\n\n` +
+        `### ⚡ Quick Actions\n` +
+        `Use \`/copilot briefing\`, \`/copilot summarize\`, or \`/setup audit\` anytime.`
       )
-      .setFooter({ text: 'EditX Autonomous Guardian 24/7' })
+      .setFooter({ text: 'EditX Autonomous Guardian • 12-Hour Executive Report' })
       .setTimestamp();
 
     return embed;
   }
+
 
   getCommands() {
     return [

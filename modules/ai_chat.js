@@ -27,6 +27,11 @@ class AIChatModule {
     this.botMemory = botMemory;
   }
 
+  setHousekeeper(housekeeper) {
+    this.housekeeper = housekeeper;
+  }
+
+
   /**
    * Fetch and cache all Discord Application Emojis from Developer Portal
    */
@@ -359,10 +364,40 @@ class AIChatModule {
       return true;
     }
 
-    // D. If server or channel is muted, stay completely quiet!
+    // D. Check for SERVER REPORT / EXECUTIVE BRIEFING (e.g. "@EditX report me last 12hrs", "@EditX report me about last 12 hrs", "@EditX give me briefing")
+    const isReportRequest = /\b(report\s+(me|us|server|staff|about|activity)|(give\s+(me\s+)?a\s+)?(briefing|overview|summary|status\s+report))\b/i.test(lower) ||
+                            (/\b(report|briefing|activity)\b/i.test(lower) && /\b(12\s*h(ou)?rs?|24\s*h(ou)?rs?|today|overnight|last\s+\d+\s*h(ou)?rs?)\b/i.test(lower));
+    if (isReportRequest && isMentioned) {
+      if (canManageAI) {
+        if (typeof message.react === 'function') {
+          await message.react('📊').catch(() => {});
+        }
+        let embed = null;
+        if (this.housekeeper && typeof this.housekeeper.generateBriefingEmbed === 'function') {
+          embed = await this.housekeeper.generateBriefingEmbed(message.guild);
+        }
+        if (embed) {
+          await message.reply({
+            content: '📊 **Here is your 12-hour executive server activity report:**',
+            embeds: [embed],
+            allowedMentions: { repliedUser: false }
+          }).catch(() => {});
+          return true;
+        }
+      } else {
+        await message.reply({
+          content: '⚠️ Executive server reports are reserved for server moderators and administrators.',
+          allowedMentions: { repliedUser: false }
+        }).catch(() => {});
+        return true;
+      }
+    }
+
+    // E. If server or channel is muted, stay completely quiet!
     if (isServerMuted || isChannelMuted) {
       return false;
     }
+
 
     // If message was ONLY a direct ping to the bot with no question or text
     if (isMentioned && textWithoutMentions.length === 0) {

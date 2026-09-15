@@ -119,7 +119,9 @@ const starboard = new StarboardModule(client, db);
 const verification = new VerificationModule(client, db);
 const socialAlerts = new SocialAlertsModule(client, db);
 const aiChat = new AIChatModule(client, db, botMemory);
+aiChat.setHousekeeper(housekeeper);
 const music = new MusicModule(client);
+
 
 // All active modules list
 const modules = [
