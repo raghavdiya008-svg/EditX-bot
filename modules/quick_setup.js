@@ -663,7 +663,7 @@ class QuickSetupModule {
       if (pingRow1.components.length > 0) pingComponents.push(pingRow1);
       if (pingRow2.components.length > 0) pingComponents.push(pingRow2);
 
-      await targetChan.send({ embeds: [pingEmbed], components: [pingComponents] });
+      await targetChan.send({ embeds: [pingEmbed], components: pingComponents });
 
       return interaction.editReply({
         content: `✅ **Reaction Role Panels Deployed!**\n3 high-gloss interactive role panels (Creative Disciplines, Software Stack, and Notification Pings) have been posted to <#${targetChan.id}>. Members can now self-assign roles via modern buttons and dropdown menus with zero Carl-bot dependencies.`

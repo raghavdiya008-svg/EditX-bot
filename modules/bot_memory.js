@@ -19,7 +19,7 @@ const {
 class BotMemoryModule {
   constructor(client, db) {
     this.client = client;
-    this.db = db;
+    this.db = db;           // full db object (all collections)
     this.utilDb = db.utility;
     this.configDb = db.config;
 
@@ -363,12 +363,36 @@ class BotMemoryModule {
           aichat_muted: this.utilDb.get(`aichat_muted_${guild.id}`),
           aichat_muted_server: this.utilDb.get(`aichat_muted_server_${guild.id}`),
           server_context: this.utilDb.get(`server_context_${guild.id}`),
-          bump_cfg: this.utilDb.get(`bump_cfg_${guild.id}`)
+          bump_cfg: this.utilDb.get(`bump_cfg_${guild.id}`),
+          forhire_chan: this.utilDb.get(`forhire_chan_${guild.id}`)
         },
         config: {
           guildConfig: this.configDb.get(guild.id)
-        }
+        },
+        // ── NEWLY BACKED-UP KEYS (were lost on every restart before this fix) ──
+        security: (() => {
+          const secDb = this.db.security || this.db.config;
+          return {
+            guildSecurity: secDb.get(guild.id),
+            aimod: secDb.get(`aimod_${guild.id}`),
+            modReportChan: secDb.get(`mod_report_chan_${guild.id}`)
+          };
+        })(),
+        tickets: (() => {
+          const ticketDb = this.db.tickets;
+          return {
+            config: ticketDb ? ticketDb.get(`config_${guild.id}`) : null
+          };
+        })(),
+        hiring: (() => {
+          const hiringDb = this.db.hiring;
+          return {
+            hiringChan: hiringDb ? hiringDb.get(`hiring_chan_${guild.id}`) : null,
+            forHireChan: hiringDb ? hiringDb.get(`forhire_chan_${guild.id}`) : null
+          };
+        })()
       };
+
 
       const jsonStr = JSON.stringify(stateSnapshot, null, 2);
       const buffer = Buffer.from(jsonStr, 'utf-8');
@@ -481,6 +505,10 @@ class BotMemoryModule {
           this.utilDb.set(`bump_cfg_${guild.id}`, snapshot.utility.bump_cfg);
           restoredCount++;
         }
+        if (snapshot.utility.forhire_chan) {
+          this.utilDb.set(`forhire_chan_${guild.id}`, snapshot.utility.forhire_chan);
+          restoredCount++;
+        }
       }
 
       // Restore config DB entries
@@ -489,8 +517,54 @@ class BotMemoryModule {
         restoredCount++;
       }
 
+      // ── RESTORE NEWLY ADDED KEYS ────────────────────────────────────────────────
+      // Security: honeypot, AI mod, mod report channel
+      if (snapshot.security) {
+        const secDb = this.db.security || this.db.config;
+        if (snapshot.security.guildSecurity) {
+          secDb.set(guild.id, snapshot.security.guildSecurity);
+          restoredCount++;
+        }
+        if (snapshot.security.aimod) {
+          secDb.set(`aimod_${guild.id}`, snapshot.security.aimod);
+          restoredCount++;
+        }
+        if (snapshot.security.modReportChan) {
+          secDb.set(`mod_report_chan_${guild.id}`, snapshot.security.modReportChan);
+          restoredCount++;
+        }
+      }
+
+      // Tickets: portal channel and category
+      if (snapshot.tickets?.config) {
+        const ticketDb = this.db.tickets;
+        if (ticketDb) {
+          ticketDb.set(`config_${guild.id}`, snapshot.tickets.config);
+          restoredCount++;
+        }
+      }
+
+      // Hiring: hiring and for-hire channel IDs
+      if (snapshot.hiring) {
+        const hiringDb = this.db.hiring;
+        if (hiringDb) {
+          if (snapshot.hiring.hiringChan) {
+            hiringDb.set(`hiring_chan_${guild.id}`, snapshot.hiring.hiringChan);
+            restoredCount++;
+          }
+          if (snapshot.hiring.forHireChan) {
+            hiringDb.set(`forhire_chan_${guild.id}`, snapshot.hiring.forHireChan);
+            // Also mirror to utility for FAQ copilot lookups
+            this.utilDb.set(`forhire_chan_${guild.id}`, snapshot.hiring.forHireChan);
+            restoredCount++;
+          }
+        }
+      }
+      // ────────────────────────────────────────────────────────────────────────────
+
       console.log(`[BOT MEMORY] Successfully restored ${restoredCount} database entries for ${guild.name} from #bot-memory!`);
       return { success: true, channelId: memChan.id, keysRestored: restoredCount };
+
     } catch (err) {
       console.error('[BOT MEMORY RESTORE ERROR]', err);
       return { success: false, error: err.message };
