@@ -180,17 +180,6 @@ class AIChatModule {
   async checkMessage(message) {
     if (message.author.bot || !message.guild) return false;
 
-    // 1. If message pings any other user (e.g. @Alter), they are addressing that user, NEVER the bot!
-    const usersList = message.mentions?.users ? (typeof message.mentions.users.filter === 'function' ? Array.from(message.mentions.users.filter(u => u.id !== this.client.user.id).values()) : Array.from(message.mentions.users.values()).filter(u => u.id !== this.client.user.id)) : [];
-    if (usersList.length > 0) {
-      return false;
-    }
-
-    // 2. If message has broad role pings (@everyone, @here, @Staff, etc.), ignore
-    if (message.mentions?.everyone || (message.mentions?.roles && message.mentions.roles.size > 0)) {
-      return false;
-    }
-
     const guildId = message.guild.id;
     const cfg = this.db.get(`aichat_cfg_${guildId}`) || {};
     const isDedicatedChannel = cfg.chatChannelId && message.channel.id === cfg.chatChannelId;
@@ -199,29 +188,44 @@ class AIChatModule {
     const isReplyingToBot = Boolean(message.reference && (await this.isReplyToBot(message)));
     const startsWithBotName = /^(\b(hey\s+|yo\s+)?editx\b|\bbot\b[,:]?\s+)/i.test(message.content);
 
-    // Check if channel or server is currently muted for AI chat
-    const mutedKey = `aichat_muted_${guildId}`;
-    let mutedChannels = this.db.get(mutedKey) || [];
-    const isChannelMuted = mutedChannels.includes(message.channel.id);
-    const isServerMuted = Boolean(this.db.get(`aichat_muted_server_${guildId}`));
+    const isDirectlyAddressed = isMentioned || isReplyingToBot || startsWithBotName;
 
-    if (!isMentioned && !isReplyingToBot && !isDedicatedChannel && !startsWithBotName) {
-      if (!isServerMuted && !isChannelMuted) {
-        const rawContent = (message.content || '').toLowerCase();
-        const faqReply = this.checkCommunityFAQ(message, rawContent);
-        if (faqReply) {
-          if (!this.faqCooldowns) this.faqCooldowns = new Map();
-          const now = Date.now();
-          const lastFaq = this.faqCooldowns.get(message.channel.id) || 0;
-          if (now - lastFaq > 45000) {
-            this.faqCooldowns.set(message.channel.id, now);
-            await message.reply({ content: faqReply, allowedMentions: { repliedUser: false } }).catch(() => {});
-            return true;
+    // If the bot is NOT directly addressed, we need strict filtering to avoid jumping into normal conversations
+    if (!isDirectlyAddressed) {
+      // 1. If message pings any other user, role, or @everyone, they are talking to someone else. Ignore.
+      const usersList = message.mentions?.users ? Array.from(message.mentions.users.values()).filter(u => u.id !== this.client.user.id) : [];
+      if (usersList.length > 0 || message.mentions?.everyone || (message.mentions?.roles && message.mentions.roles.size > 0)) {
+        return false;
+      }
+
+      // Check for mute settings
+      const isChannelMuted = (this.db.get(`aichat_muted_${guildId}`) || []).includes(message.channel.id);
+      const isServerMuted = Boolean(this.db.get(`aichat_muted_server_${guildId}`));
+
+      // If it's NOT a dedicated channel, it's just a normal message. Maybe check FAQ, then ignore.
+      if (!isDedicatedChannel) {
+        if (!isServerMuted && !isChannelMuted) {
+          const rawContent = (message.content || '').toLowerCase();
+          const faqReply = this.checkCommunityFAQ(message, rawContent);
+          if (faqReply) {
+            if (!this.faqCooldowns) this.faqCooldowns = new Map();
+            const now = Date.now();
+            const lastFaq = this.faqCooldowns.get(message.channel.id) || 0;
+            if (now - lastFaq > 45000) {
+              this.faqCooldowns.set(message.channel.id, now);
+              await message.reply({ content: faqReply, allowedMentions: { repliedUser: false } }).catch(() => {});
+              return true;
+            }
           }
         }
+        return false;
       }
-      return false;
     }
+
+    // Check for mute settings for directly addressed messages
+    const isChannelMuted = (this.db.get(`aichat_muted_${guildId}`) || []).includes(message.channel.id);
+    const isServerMuted = Boolean(this.db.get(`aichat_muted_server_${guildId}`));
+
 
     // Clean prompt by removing bot mention or prefix
     let prompt = message.content.replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '')
@@ -266,8 +270,10 @@ class AIChatModule {
       }
 
       if (isChannelMuted) {
-        mutedChannels = mutedChannels.filter(id => id !== message.channel.id);
-        this.db.set(mutedKey, mutedChannels);
+        const mutedKey = `aichat_muted_${guildId}`;
+        let mChannels = this.db.get(mutedKey) || [];
+        mChannels = mChannels.filter(id => id !== message.channel.id);
+        this.db.set(mutedKey, mChannels);
       }
       if (this.botMemory) {
         await this.botMemory.logDirectiveEvent(message.guild, `AI replies unmuted in #${message.channel.name}.`, message.author);
@@ -318,7 +324,9 @@ class AIChatModule {
       }
 
       // Channel-specific mute
-      if (!isChannelMuted) {
+      const mutedKey = `aichat_muted_${guildId}`;
+      let mutedChannels = this.db.get(mutedKey) || [];
+      if (!mutedChannels.includes(message.channel.id)) {
         mutedChannels.push(message.channel.id);
         this.db.set(mutedKey, mutedChannels);
       }
