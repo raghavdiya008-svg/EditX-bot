@@ -440,7 +440,28 @@ class AIChatModule {
     // Send typing indicator
     await message.channel.sendTyping().catch(() => {});
 
-    const responseText = await this.generateResponse(prompt, {
+    // Resolve mentions to readable human names in the prompt for the LLM
+    let cleanPromptForLLM = prompt;
+    if (message.mentions.users && message.mentions.users.size > 0) {
+      for (const [userId, user] of message.mentions.users) {
+        if (userId === this.client.user.id) continue;
+        const member = message.guild.members.cache.get(userId);
+        const name = member ? (member.displayName || member.user.username) : user.username;
+        cleanPromptForLLM = cleanPromptForLLM.replace(new RegExp(`<@!?${userId}>`, 'g'), `@${name}`);
+      }
+    }
+    if (message.mentions.roles && message.mentions.roles.size > 0) {
+      for (const [roleId, role] of message.mentions.roles) {
+        cleanPromptForLLM = cleanPromptForLLM.replace(new RegExp(`<@&${roleId}>`, 'g'), `@${role.name}`);
+      }
+    }
+    if (message.mentions.channels && message.mentions.channels.size > 0) {
+      for (const [chanId, channel] of message.mentions.channels) {
+        cleanPromptForLLM = cleanPromptForLLM.replace(new RegExp(`<#${chanId}>`, 'g'), `#${channel.name}`);
+      }
+    }
+
+    const responseText = await this.generateResponse(cleanPromptForLLM, {
       userName: message.member?.displayName || message.author.username,
       guildName: message.guild.name,
       guildId: message.guild.id,
@@ -575,17 +596,19 @@ User: ${context.userName || 'Member'}${serverContextSection}
 CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
 1. CASUAL CHAT & SMALL TALK (STRICT):
    - Chat like a real human in a Discord server, NOT an AI chatbot, sales rep, or corporate assistant.
-   - For greetings, small talk, check-ins, or follow-ups (e.g. "Good, and you?", "how are you", "what's up", "doing good", "hey", "hbu", "wbu", "nm"): Reply in ONLY 1 OR 2 SHORT SENTENCES max (e.g. "Doing great, thanks! What are you working on today?").
-   - NEVER dump capability menus, bullet points, or feature lists ("What are we creating today? Let me know if you need help with: Video Editing...") unless the user EXPLICITLY asks "What can you do?" or "List your features".
+   - For greetings, small talk, check-ins, or follow-ups: Reply in ONLY 1 OR 2 SHORT SENTENCES max.
+   - NEVER dump capability menus, bullet points, or feature lists unless EXPLICITLY asked.
    - Under NO circumstances send walls of text or unsolicited essays. Keep normal chat under 2-3 sentences.
-2. TECHNICAL QUESTIONS:
-   - For video editing (Premiere, AE, DaVinci, CapCut), design (Photoshop, Blender), VFX, or freelancing: Give direct, accurate answers in 2-4 sentences. Only use short bullet steps if the user asked for a step-by-step tutorial or troubleshooting guide.
-3. CONTEXT:
+2. GREETINGS & SERVER EXPLANATIONS (WHEN ASKED):
+   - If asked to greet, welcome, introduce, or explain the server to someone (e.g. "greet @User", "welcome @User", "explain about server to @User"): Speak directly and warmly to them in 1-3 natural, friendly sentences! (e.g. "Yo @User! Welcome to EditX, the creative editing hub! Glad to have you here 🎉").
+3. TECHNICAL QUESTIONS:
+   - For video editing, design, VFX, or freelancing: Give direct, accurate answers in 2-4 sentences.
+4. CONTEXT:
    - Never answer messages meant for other members.
    - Never repeat canned robotic greetings or repetitive introductions.${directivesSection}`;
 
     if (context.canManageAI) {
-      systemPrompt += `\n\n4. ⚠️ SERVER ADMINISTRATION (AUTONOMOUS ACTION ENGINE):
+      systemPrompt += `\n\n5. ⚠️ SERVER ADMINISTRATION (AUTONOMOUS ACTION ENGINE):
    - The user talking to you is a Server Administrator. You have been granted full execution powers to do ANYTHING they ask.
    - If they ask you to kick, ban, timeout, purge messages, add/remove a role, rename a channel, or create a channel, you MUST comply by appending a special JSON block at the very end of your reply.
    - The format MUST be exactly: \`$$ACTION$$ {"action": "kick|ban|timeout|purge|add_role|remove_role|create_channel|rename_channel", "targetId": "discord_id_or_name", "value": "number_or_text", "reason": "optional reason"}\`
@@ -603,7 +626,7 @@ CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
           contents: `${systemPrompt}\n\nUser Question:\n${prompt}`,
           config: {
             temperature: 0.5,
-            maxOutputTokens: 250
+            maxOutputTokens: 500
           }
         });
         if (res.text && res.text.trim()) {
@@ -630,7 +653,7 @@ CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
               { role: 'user', content: prompt }
             ],
             temperature: 0.5,
-            max_tokens: 250
+            max_tokens: 500
           })
         });
 
