@@ -390,6 +390,14 @@ class BotMemoryModule {
             hiringChan: hiringDb ? hiringDb.get(`hiring_chan_${guild.id}`) : null,
             forHireChan: hiringDb ? hiringDb.get(`forhire_chan_${guild.id}`) : null
           };
+        })(),
+        xp: (() => {
+          if (!this.db.xp) return null;
+          const data = {};
+          for (const [k, v] of this.db.xp.entries()) {
+            if (k.startsWith(`${guild.id}_`)) data[k] = v;
+          }
+          return data;
         })()
       };
 
@@ -559,6 +567,15 @@ class BotMemoryModule {
             restoredCount++;
           }
         }
+      }
+      // XP & Leveling: Restore all user XP profiles
+      if (snapshot.xp && this.db.xp) {
+        let xpCount = 0;
+        for (const [k, v] of Object.entries(snapshot.xp)) {
+          this.db.xp.set(k, v);
+          xpCount++;
+        }
+        if (xpCount > 0) restoredCount += xpCount;
       }
       // ────────────────────────────────────────────────────────────────────────────
 

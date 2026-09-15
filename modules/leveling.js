@@ -361,6 +361,8 @@ class LevelingModule {
   }
 
   handleChatXP(message) {
+    if (message.author.bot) return;
+
     const key = `${message.guild.id}_${message.author.id}`;
     const now = Date.now();
     const data = this.db.get(key) || { xp: 0, level: 0, lastMessage: 0 };
