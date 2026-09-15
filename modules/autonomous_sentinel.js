@@ -329,6 +329,29 @@ Output strictly valid JSON:
     const severity = verdict.severity || 'HIGH';
     const reason = verdict.reason || 'Automated rule enforcement';
 
+    // ── REPORT-ONLY / LOG-ONLY GATE ──────────────────────────────────────────
+    // When the server is configured in REPORT_ONLY or LOG_ONLY mode, the sentinel
+    // must NEVER auto-delete, auto-ban, or auto-timeout.  Only dispatch the
+    // incident report card so human mods retain 100% control.
+    const aimodCfg = this.db.get(`aimod_${guild.id}`) || { enabled: true, action: 'REPORT_ONLY' };
+    if (aimodCfg.action === 'REPORT_ONLY' || aimodCfg.action === 'LOG_ONLY') {
+      const actionTakenLabel = 'Reported to Staff (Mods in Full Control • 1-Click Buttons)';
+      const incident = {
+        timestamp: Date.now(),
+        user: `${user.username} (${user.id})`,
+        category: verdict.category,
+        severity,
+        action: actionTakenLabel,
+        reason,
+        channel: message.channel.name,
+        confidence: Math.round((verdict.confidence || 0.9) * 100)
+      };
+      this.incidentJournal.push(incident);
+      await this.dispatchStaffReport(guild, message, verdict, actionTakenLabel, contextSnippet);
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     let actionTaken = 'Deleted Message';
 
     // 1. Delete offending message
@@ -378,6 +401,9 @@ Output strictly valid JSON:
 
   async dispatchStaffReport(guild, message, verdict, actionTaken, contextSnippet) {
     try {
+      const aimodCfg = this.db.get(`aimod_${guild.id}`) || { enabled: true, action: 'REPORT_ONLY' };
+      const isReportOnly = aimodCfg.action === 'REPORT_ONLY' || aimodCfg.action === 'LOG_ONLY';
+
       const logChan = Array.from(guild.channels.cache.values()).find(c =>
         c.type === ChannelType.GuildText && (
           c.name.includes('modlog') ||
@@ -389,23 +415,31 @@ Output strictly valid JSON:
 
       if (!logChan) return;
 
+      const embedTitle = isReportOnly
+        ? `🛡️ Incident Flagged — Awaiting Moderator Review`
+        : `⚡ Auto-Action Executed: ${actionTaken}`;
+
+      const embedColor = isReportOnly
+        ? 0xF59E0B
+        : (verdict.severity === 'CRITICAL' ? 0xED4245 : 0xFEE75C);
+
       const embed = new EmbedBuilder()
-        .setColor(verdict.severity === 'CRITICAL' ? 0xED4245 : 0xFEE75C)
+        .setColor(embedColor)
         .setAuthor({
           name: `🛡️ Autonomous Sentinel • ${verdict.category || 'Security Alert'}`,
           iconURL: guild.iconURL({ dynamic: true }) || undefined
         })
-        .setTitle(`Auto-Action Executed: ${actionTaken}`)
+        .setTitle(embedTitle)
         .setDescription(
           `**Target User:** <@${message.author.id}> (\`${message.author.id}\`)\n` +
-          `**Channel:** <#${message.channel.id}>\n` +
+          `**Channel:** <#${message.channel.id}> — [Jump to Message](${message.url})\n` +
           `**Confidence:** \`${Math.round((verdict.confidence || 0.9) * 100)}%\`\n\n` +
           `### 🧠 AI Rationale & Context Analysis\n` +
           `> "${verdict.reason}"\n\n` +
           `### 📜 Offending Message\n` +
           `\`\`\`\n${(message.content || '').slice(0, 500)}\n\`\`\``
         )
-        .setFooter({ text: 'EditX Autonomous Guardian 24/7' })
+        .setFooter({ text: isReportOnly ? 'EditX Mod Copilot • Mods in Full Control' : 'EditX Autonomous Guardian 24/7' })
         .setTimestamp();
 
       await logChan.send({ embeds: [embed] }).catch(() => {});

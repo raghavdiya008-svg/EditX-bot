@@ -10,6 +10,7 @@ class AIChatModule {
   constructor(client, db, botMemory = null) {
     this.client = client;
     this.db = db.utility; // Store AI chat configs
+    this.securityDb = db.security; // For aimod mode changes via chat
     this.botMemory = botMemory;
     this.geminiKey = process.env.GEMINI_API_KEY;
     this.groqKey = process.env.GROQ_API_KEY;
@@ -373,7 +374,34 @@ class AIChatModule {
       return true;
     }
 
+    // D-0. Natural-Language Moderation Mode Switch (Admin/Mod only)
+    // Handles: "@EditX set report only mode", "@EditX enable auto enforce", "@EditX report only", etc.
+    if (isMentioned && canManageAI && this.securityDb) {
+      const isSetReportOnly = /\b(set|enable|switch\s+to|use|activate)\s+(report[\s-]only|report\s+mode|human\s+mod(\s+mode)?|copilot\s+mode)\b/i.test(lower) ||
+                              /\breport[\s-]?only(\s+mode)?\b/i.test(lower);
+      const isSetAutoEnforce = /\b(set|enable|switch\s+to|use|activate)\s+(auto[\s-]?enforce|autonomous(\s+mode)?|enforce(\s+mode)?)\b/i.test(lower);
+
+      if (isSetReportOnly || isSetAutoEnforce) {
+        const guildId = message.guild.id;
+        const cfgKey = `aimod_${guildId}`;
+        const aimodCfg = this.securityDb.get(cfgKey) || { enabled: true, action: 'REPORT_ONLY', alertChannel: null };
+        aimodCfg.action = isSetReportOnly ? 'REPORT_ONLY' : 'AUTO_ENFORCE';
+        this.securityDb.set(cfgKey, aimodCfg);
+
+        const modeLabel = isSetReportOnly
+          ? '🛡️ **Report-Only Mode** — I will flag incidents and send them to your mod channel with 1-click action buttons. No messages will be auto-deleted and no users will be auto-punished. Mods are in full control.'
+          : '⚡ **Auto-Enforce Mode** — I will automatically delete offending messages and punish high-confidence threats.';
+
+        await message.reply({
+          content: `✅ Moderation mode updated!\n> ${modeLabel}`,
+          allowedMentions: { repliedUser: false }
+        }).catch(() => {});
+        return true;
+      }
+    }
+
     // D. Check for SERVER REPORT / EXECUTIVE BRIEFING (e.g. "@EditX report me last 12hrs", "@EditX report me about last 12 hrs", "@EditX give me briefing")
+
     const isReportRequest = /\b(report\s+(me|us|server|staff|about|activity)|(give\s+(me\s+)?a\s+)?(briefing|overview|summary|status\s+report))\b/i.test(lower) ||
                             (/\b(report|briefing|activity)\b/i.test(lower) && /\b(12\s*h(ou)?rs?|24\s*h(ou)?rs?|today|overnight|last\s+\d+\s*h(ou)?rs?)\b/i.test(lower));
     if (isReportRequest && isMentioned) {
