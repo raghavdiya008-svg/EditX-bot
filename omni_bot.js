@@ -379,22 +379,36 @@ client.on(Events.MessageReactionRemove, async (reaction, user) => {
   }
 });
 
-// Logging Audit Listeners
-client.on(Events.GuildMemberUpdate, (oldM, newM) => logging.handleMemberUpdate(oldM, newM));
-client.on(Events.VoiceStateUpdate, (oldS, newS) => logging.handleVoiceStateUpdate(oldS, newS));
-client.on(Events.ChannelCreate, (c) => logging.handleChannelCreate(c));
-client.on(Events.ChannelDelete, (c) => logging.handleChannelDelete(c));
-client.on(Events.GuildRoleCreate, (r) => logging.handleRoleCreate(r));
-client.on(Events.GuildRoleDelete, (r) => logging.handleRoleDelete(r));
-client.on(Events.GuildBanAdd, (b) => logging.handleBanAdd(b));
-client.on(Events.GuildBanRemove, (b) => logging.handleBanRemove(b));
-
-// Anti-Nuke & Server Protection yielded exclusively to Wick Bot
-
 // Invite Tracking Delegations
 client.on(Events.InviteCreate, i => utility.handleInviteCreate(i));
 client.on(Events.InviteDelete, i => utility.handleInviteDelete(i));
 client.on(Events.GuildCreate, g => utility.handleGuildCreate(g));
 client.on(Events.GuildDelete, g => utility.handleGuildDelete(g));
 
-client.login(TOKEN);
+// Global Process Crash Protection
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION]', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]', err);
+});
+
+// Resilient Bot Launch & Auto-Reconnect Engine
+async function startBot(retries = 15, delay = 5000) {
+  try {
+    console.log('[BOOT] Connecting to Discord Gateway...');
+    await client.login(TOKEN);
+  } catch (err) {
+    console.error(`[BOOT ERROR] Failed to connect to Discord (HTTP ${err.status || err.code || 'ERR'}):`, err.message);
+    if (retries > 0) {
+      console.log(`[BOOT RETRY] Retrying connection in ${delay / 1000}s... (${retries} attempts remaining)`);
+      setTimeout(() => startBot(retries - 1, Math.min(delay * 1.5, 30000)), delay);
+    } else {
+      console.error('[BOOT FATAL] Exceeded maximum connection retries to Discord Gateway. Exiting for container restart.');
+      process.exit(1);
+    }
+  }
+}
+
+startBot();
