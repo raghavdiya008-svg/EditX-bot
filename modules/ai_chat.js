@@ -179,6 +179,7 @@ class AIChatModule {
    */
   async checkMessage(message) {
     if (message.author.bot || !message.guild) return false;
+    try {
 
     const guildId = message.guild.id;
     const cfg = this.db.get(`aichat_cfg_${guildId}`) || {};
@@ -500,6 +501,10 @@ class AIChatModule {
     }
 
     return true;
+    } catch (err) {
+      console.error('[AI CHAT ERROR]', err);
+      return false;
+    }
   }
 
   async executeAutonomousAction(message, action) {
