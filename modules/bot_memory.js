@@ -61,6 +61,18 @@ class BotMemoryModule {
           s.setName('scan')
             .setDescription('Deep-scan all channels, rules & categories into bot memory')
         )
+        .addSubcommand(s =>
+          s.setName('add')
+            .setDescription('Add a new custom rule/directive for the bot to strictly obey')
+            .addStringOption(o => o.setName('rule').setDescription('The rule text').setRequired(true))
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDMPermission(false),
+
+      new SlashCommandBuilder()
+        .setName('rule')
+        .setDescription('Add a new custom rule/directive for the bot to strictly obey')
+        .addStringOption(o => o.setName('instruction').setDescription('The rule or directive for EditX AI to follow').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .setDMPermission(false),
 
@@ -77,10 +89,20 @@ class BotMemoryModule {
   }
 
   async handleCommand(interaction) {
-    if (interaction.commandName !== 'memory' && interaction.commandName !== 'scan') return false;
+    if (interaction.commandName !== 'memory' && interaction.commandName !== 'scan' && interaction.commandName !== 'rule') return false;
 
     const guild = interaction.guild;
     await interaction.deferReply({ ephemeral: true });
+
+    if (interaction.commandName === 'rule' || (interaction.commandName === 'memory' && interaction.options.getSubcommand() === 'add')) {
+      const instruction = interaction.options.getString('instruction') || interaction.options.getString('rule');
+      const result = await this.addDirective(guild, instruction, interaction.user);
+      if (result.success) {
+        return interaction.editReply(`🧠 **Directive Learned & Saved to Memory!**\n• **Rule:** "${instruction}"\n• **Rules Channel:** ${result.channelId ? `<#${result.channelId}>` : '`#bot-rules`'}\nI will strictly follow this instruction in all future responses.`);
+      } else {
+        return interaction.editReply(`⚠️ **Failed to save directive:** ${result.error}`);
+      }
+    }
 
     if (interaction.commandName === 'scan' || (interaction.commandName === 'memory' && interaction.options.getSubcommand() === 'scan')) {
       const result = await this.scanServer(guild, interaction.user);
@@ -398,9 +420,9 @@ class BotMemoryModule {
             if (k.startsWith(`${guild.id}_`)) data[k] = v;
           }
           return data;
-        })()
+        })(),
+        directives: this.utilDb.get(`directives_${guild.id}`) || this.guildDirectives.get(guild.id) || []
       };
-
 
       const jsonStr = JSON.stringify(stateSnapshot, null, 2);
       const buffer = Buffer.from(jsonStr, 'utf-8');
@@ -577,6 +599,13 @@ class BotMemoryModule {
         }
         if (xpCount > 0) restoredCount += xpCount;
       }
+
+      // Directives & Rules: Restore custom live rules
+      if (snapshot.directives && Array.isArray(snapshot.directives) && snapshot.directives.length > 0) {
+        this.utilDb.set(`directives_${guild.id}`, snapshot.directives, true);
+        this.guildDirectives.set(guild.id, snapshot.directives);
+        restoredCount += snapshot.directives.length;
+      }
       // ────────────────────────────────────────────────────────────────────────────
 
       console.log(`[BOT MEMORY] Successfully restored ${restoredCount} database entries for ${guild.name} from #bot-memory!`);
@@ -594,28 +623,34 @@ class BotMemoryModule {
   async syncDirectives(guild) {
     try {
       const rulesChan = await this.getRulesChannel(guild);
-      if (!rulesChan) return;
+      const directives = [];
 
-      const messages = await rulesChan.messages.fetch({ limit: 50 }).catch(() => null);
-      if (!messages || messages.size === 0) {
-        this.guildDirectives.set(guild.id, []);
-        return;
+      if (rulesChan) {
+        const messages = await rulesChan.messages.fetch({ limit: 50 }).catch(() => null);
+        if (messages && messages.size > 0) {
+          const sorted = Array.from(messages.values()).reverse();
+          for (const msg of sorted) {
+            // Ignore bot's own instructional embeds
+            if (msg.author.id === this.client.user?.id && msg.embeds?.length > 0) continue;
+            if (!msg.content || !msg.content.trim()) continue;
+
+            let cleanRule = msg.content.trim();
+            cleanRule = cleanRule.replace(/^📌\s*\*\*Directive[^*]*\*\*:\s*/i, '').trim();
+            if (cleanRule.length > 0 && !directives.includes(cleanRule)) {
+              directives.push(cleanRule);
+            }
+          }
+        }
       }
 
-      const directives = [];
-      // Chronological order (oldest to newest)
-      const sorted = Array.from(messages.values()).reverse();
-
-      for (const msg of sorted) {
-        // Ignore bot's own instructional embeds
-        if (msg.author.id === this.client.user?.id && msg.embeds?.length > 0) continue;
-        if (!msg.content || !msg.content.trim()) continue;
-
-        const cleanRule = msg.content.trim();
-        directives.push(cleanRule);
+      // Merge with persistent DB so we never lose directives
+      const dbDirectives = this.utilDb.get(`directives_${guild.id}`) || [];
+      for (const d of dbDirectives) {
+        if (!directives.includes(d)) directives.push(d);
       }
 
       this.guildDirectives.set(guild.id, directives);
+      this.utilDb.set(`directives_${guild.id}`, directives, true);
       console.log(`[BOT RULES] Synced ${directives.length} active custom directives for ${guild.name}`);
     } catch (err) {
       console.warn(`[BOT RULES] Sync error for ${guild?.name}:`, err.message);
@@ -650,13 +685,22 @@ class BotMemoryModule {
    * Formatted string of active directives for LLM system prompt injection
    */
   getDirectives(guildId) {
-    const list = this.guildDirectives.get(guildId) || [];
+    let list = this.guildDirectives.get(guildId);
+    if (!list || !list.length) {
+      list = this.utilDb.get(`directives_${guildId}`) || [];
+      this.guildDirectives.set(guildId, list);
+    }
     if (!list.length) return '';
-    return list.map((rule, idx) => `${idx + 1}. ${rule}`).join('\n');
+    return list.map((rule, idx) => `• RULE ${idx + 1}: ${rule}`).join('\n');
   }
 
   getDirectivesList(guildId) {
-    return this.guildDirectives.get(guildId) || [];
+    let list = this.guildDirectives.get(guildId);
+    if (!list || !list.length) {
+      list = this.utilDb.get(`directives_${guildId}`) || [];
+      this.guildDirectives.set(guildId, list);
+    }
+    return list;
   }
 
   /**
@@ -692,10 +736,16 @@ class BotMemoryModule {
         }
       }
 
-      // Add to cached list
-      const list = this.guildDirectives.get(guild.id) || [];
-      list.push(directiveText);
+      // Add to cached list and persistent database
+      let list = this.guildDirectives.get(guild.id);
+      if (!list || !list.length) {
+        list = this.utilDb.get(`directives_${guild.id}`) || [];
+      }
+      if (!list.includes(directiveText)) {
+        list.push(directiveText);
+      }
       this.guildDirectives.set(guild.id, list);
+      this.utilDb.set(`directives_${guild.id}`, list, true);
 
       // Trigger state backup to memory vault
       await this.backupState(guild);

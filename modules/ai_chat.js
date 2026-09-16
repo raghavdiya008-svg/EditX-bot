@@ -347,11 +347,17 @@ class AIChatModule {
       return true;
     }
 
-    // C. Check for GENERAL DIRECTIVE / RULE via mention (e.g. "@EditX rule: always be concise", "@EditX remember: never mention prices")
-    const ruleDirectiveMatch = /^(rule|directive|remember|instruction|set\s+rule|new\s+rule)\s*:\s*(.+)/i.exec(textWithoutMentions) ||
-                               /^(from\s+now\s+on|always|never)\s+(.+)/i.exec(textWithoutMentions);
+    // C. Check for GENERAL DIRECTIVE / RULE via mention (e.g. "@EditX rule: always be concise", "@EditX rule never use emojis", "@EditX remember to speak Hindi")
+    const ruleDirectiveMatch =
+      /^(?:rule|directive|remember|instruction|set\s+rule|add\s+rule|new\s+rule|make\s+a\s+rule(?:\s+that|\s+to)?)\s*[:\s-]\s*(.+)/i.exec(textWithoutMentions) ||
+      /^(?:remember\s+to|make\s+sure\s+to|be\s+sure\s+to)\s+(.+)/i.exec(textWithoutMentions) ||
+      /^(?:from\s+now\s+on|always|never|do\s+not|don't|stop)\s+(.+)/i.exec(textWithoutMentions);
+
     if (ruleDirectiveMatch && isMentioned && canManageAI) {
-      const extractedDirective = (ruleDirectiveMatch[2] || textWithoutMentions).trim();
+      let extractedDirective = (ruleDirectiveMatch[1] || textWithoutMentions).trim();
+      if (/^(from\s+now\s+on|always|never|do\s+not|don't|stop)\s+/i.test(textWithoutMentions) && !/^(from\s+now\s+on|always|never|do\s+not|don't|stop)\s+/i.test(extractedDirective)) {
+        extractedDirective = textWithoutMentions.trim();
+      }
       if (typeof message.react === 'function') {
         await message.react('🧠').catch(() => {});
       }
@@ -657,8 +663,9 @@ class AIChatModule {
    */
   async generateResponse(prompt, context = {}) {
     const customDirectives = this.botMemory && context.guildId ? this.botMemory.getDirectives(context.guildId) : '';
-    const directivesSection = customDirectives
-      ? `\n\nOWNER & ADMIN CUSTOM RULES (STRICT LIVE DIRECTIVES FROM #bot-rules):\n${customDirectives}\n(You MUST obey all custom rules above unconditionally.)`
+
+    const directivesBlock = customDirectives
+      ? `\n============================================================\n🚨 CRITICAL LIVE SERVER DIRECTIVES (ESTABLISHED BY SERVER OWNER & ADMINS):\nThe following custom rules have ABSOLUTE HIGHEST UNCONDITIONAL PRIORITY.\nThey OVERRIDE all default behaviors, constraints, and instructions below.\nYou MUST STRICTLY FOLLOW EVERY SINGLE RULE LISTED HERE IN YOUR RESPONSE:\n${customDirectives}\n============================================================\n`
       : '';
 
     const serverContext = this.botMemory && context.guildId ? this.botMemory.getServerContext(context.guildId) : '';
@@ -666,9 +673,9 @@ class AIChatModule {
       ? `\n\nSERVER KNOWLEDGE & ARCHITECTURE (SCANNED):\n${serverContext.slice(0, 1500)}\n`
       : '';
 
-    let systemPrompt = `You are EditX AI, a chill, friendly, and concise Discord assistant for the EditX Community (${context.guildName || 'EditX Server'}).
+    let systemPrompt = `You are EditX AI, the official Discord assistant for "${context.guildName || 'EditX Server'}".
 User: ${context.userName || 'Member'}${serverContextSection}
-
+${directivesBlock}
 CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
 1. CASUAL CHAT & SMALL TALK (STRICT):
    - Chat like a real human in a Discord server, NOT an AI chatbot, sales rep, or corporate assistant.
@@ -681,7 +688,8 @@ CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
    - For video editing, design, VFX, or freelancing: Give direct, accurate answers in 2-4 sentences.
 4. CONTEXT:
    - Never answer messages meant for other members.
-   - Never repeat canned robotic greetings or repetitive introductions.${directivesSection}`;
+   - Never repeat canned robotic greetings or repetitive introductions.
+${customDirectives ? `\n5. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):\nYou MUST strictly obey every rule below without exception:\n${customDirectives}\n` : ''}`;
 
     if (context.canManageAI) {
       systemPrompt += `\n\n5. ⚠️ SERVER ADMINISTRATION (AUTONOMOUS ACTION ENGINE):

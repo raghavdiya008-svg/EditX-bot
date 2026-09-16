@@ -284,9 +284,16 @@ class AIModerationModule {
     this.requestTimestamps.push(now);
     this.stats.scansApiCalled++;
 
-    // Ingest indexed server rules if available
+    // Ingest indexed server rules & custom directives if available
     const serverRules = guildId ? this.db.get(`rules_${guildId}`) : null;
-    const rulesPrompt = serverRules ? `\n\nSpecific Server Rules & Guidelines to Enforce:\n"""${serverRules.slice(0, 1500)}"""\n` : '';
+    let customDirectives = '';
+    if (this.client?.botMemory && typeof this.client.botMemory.getDirectives === 'function') {
+      customDirectives = this.client.botMemory.getDirectives(guildId);
+    }
+    let combinedRules = '';
+    if (serverRules) combinedRules += `\nServer Rules:\n${serverRules.slice(0, 1000)}`;
+    if (customDirectives) combinedRules += `\nLive Admin Directives (Highest Priority):\n${customDirectives}`;
+    const rulesPrompt = combinedRules ? `\n\nSpecific Server Rules & Directives to Enforce:\n"""${combinedRules.slice(0, 1500)}"""\n` : '';
 
     const systemPrompt = `You are an elite Discord Security AI filter. Analyze this chat message for critical server violations:
 - SCAM_PHISHING: Discord token stealers, fake Nitro claims, crypto schemes, steam gift scams, malicious links.

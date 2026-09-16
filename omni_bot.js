@@ -100,6 +100,7 @@ client.inviteCache = new Map();
 
 // Initialize Modules
 const botMemory = new BotMemoryModule(client, db);
+client.botMemory = botMemory;
 const roles = new RolesModule(client, db);
 const leveling = new LevelingModule(client, db, roles);
 const quickSetup = new QuickSetupModule(client, db);
