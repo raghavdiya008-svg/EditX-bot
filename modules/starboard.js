@@ -44,8 +44,8 @@ class StarboardModule {
     }
 
     if (sub === 'top') {
-      const allStars = this.db.entries()
-        .filter(([k]) => k.startsWith(`star_${guildId}_`))
+      const allStars = (this.db.entries ? this.db.entries() : [])
+        .filter(([k, v]) => k.startsWith(`star_${guildId}_`) && v && typeof v === 'object')
         .map(([k, v]) => v)
         .sort((a, b) => (b.starCount || 0) - (a.starCount || 0))
         .slice(0, 10);

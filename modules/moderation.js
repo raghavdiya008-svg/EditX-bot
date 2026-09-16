@@ -226,6 +226,14 @@ class ModerationModule {
             .addChannelOption(o => o.setName('channel').setDescription('Rules channel (e.g. #rules)').addChannelTypes(ChannelType.GuildText))
             .addStringOption(o => o.setName('custom_rules').setDescription('Directly provide or paste server rules text')))
           .addSubcommand(s => s.setName('status').setDescription('View current Mod Assistant reporting configuration and indexed rules')))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).setDMPermission(false),
+
+      new SlashCommandBuilder().setName('reportmode').setDescription('Switch bot moderation mode between Report-Only and Auto-Enforce')
+        .addStringOption(o => o.setName('mode').setDescription('Operating mode').setRequired(true)
+          .addChoices(
+            { name: 'Report Only (Mods in Full Control • 1-Click Action Buttons)', value: 'REPORT_ONLY' },
+            { name: 'Autonomous Enforce (Bot automatically deletes & punishes)', value: 'AUTO_ENFORCE' }
+          ))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).setDMPermission(false)
     ];
   }
@@ -941,6 +949,18 @@ class ModerationModule {
         }
 
         return interaction.editReply({ embeds: [embed] });
+      }
+
+      case 'reportmode': {
+        const selectedMode = options.getString('mode');
+        const aimodKey = `aimod_${guild.id}`;
+        const aimodCfg = this.db.get(aimodKey) || { enabled: true, action: 'REPORT_ONLY', alertChannel: null };
+        aimodCfg.action = selectedMode;
+        this.db.set(aimodKey, aimodCfg);
+        const modeDesc = selectedMode === 'REPORT_ONLY'
+          ? '🛡️ **Human Mod Assistant (Report Only)** — The bot will NOT auto-delete or auto-punish; all incidents are reported to your alert channel with 1-click action buttons.'
+          : '⚡ **Autonomous Enforce** — The bot will automatically delete offending content and punish high-confidence threats.';
+        return interaction.reply({ content: `✅ Mode updated:\n> ${modeDesc}`, ephemeral: true });
       }
 
       case 'mod':

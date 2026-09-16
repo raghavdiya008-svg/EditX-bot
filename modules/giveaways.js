@@ -160,15 +160,20 @@ class GiveawaysModule {
       await msg.edit({ embeds: [embed], components: [] }).catch(() => {});
     }
 
-    chan.send(`🎊 Congratulations ${winnerMentions}! You won the giveaway for **${gw.prize}**! 🎁`);
+    await chan.send(`🎊 Congratulations ${winnerMentions}! You won the giveaway for **${gw.prize}**! 🎁`).catch(() => {});
   }
 
   async checkGiveaways() {
-    const now = Date.now();
-    for (const [key, gw] of this.db.entries()) {
-      if (key.startsWith('gw_') && !gw.ended && gw.endsAt <= now) {
-        await this.endGiveaway(gw);
+    try {
+      if (!this.db || typeof this.db.entries !== 'function') return;
+      const now = Date.now();
+      for (const [key, gw] of this.db.entries()) {
+        if (key.startsWith('gw_') && gw && !gw.ended && gw.endsAt && gw.endsAt <= now) {
+          await this.endGiveaway(gw).catch(() => {});
+        }
       }
+    } catch (err) {
+      console.warn('[GIVEAWAYS CHECK ERROR]', err.message);
     }
   }
 }

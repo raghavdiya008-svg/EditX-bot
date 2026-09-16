@@ -21,6 +21,7 @@ class AIModerationModule {
 
     const apiKey = process.env.GEMINI_API_KEY;
     this.ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+    this.groqKey = process.env.GROQ_API_KEY;
 
     // Rate Limiter: Max 10 requests per minute
     this.maxRpm = 10;
@@ -221,7 +222,8 @@ class AIModerationModule {
   }
 
   async checkMessage(message) {
-    if (!this.ai) return true;
+    if (message._editx_flagged) return true;
+    if (!this.ai && !this.groqKey) return true;
 
     const guildId = message.guild.id;
     const cfgKey = `aimod_${guildId}`;
@@ -350,15 +352,75 @@ Respond strictly in valid JSON format:
       return verdict;
     } catch (err) {
       const msg = String(err.message || err);
-      // If 429 RateLimit, activate circuit breaker for 60 seconds
+      // If 429 RateLimit, activate circuit breaker for 60 seconds and use Groq fallback
       if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
-        console.warn('[AI MOD] 429 Rate limit encountered, cooling down for 60s');
+        console.warn('[AI MOD] 429 Rate limit encountered, falling back to Groq');
         this.circuitBreakerUntil = Date.now() + 60000;
       } else {
         console.error('[AI MOD ERROR]', err.message);
       }
+
+      const groqVerdict = await this.analyzeWithGroq(text, systemPrompt, contextInfo, normalized, now);
+      if (groqVerdict) return groqVerdict;
+
       return { flagged: false, category: 'ERROR', confidence: 0, reason: 'AI inspection unavailable' };
     }
+  }
+
+  async analyzeWithGroq(text, systemPrompt, contextInfo, normalized, now) {
+    if (!this.groqKey) return null;
+    try {
+      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.groqKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'qwen/qwen3.8-27b',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `Context: ${contextInfo}\nMessage to analyze:\n"""${text.slice(0, 1000)}"""` }
+          ],
+          temperature: 0.1,
+          max_tokens: 300
+        })
+      });
+
+      if (groqRes.ok) {
+        const data = await groqRes.json();
+        let rawText = data.choices?.[0]?.message?.content || '';
+        if (rawText.startsWith('```json')) rawText = rawText.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+        else if (rawText.startsWith('```')) rawText = rawText.replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+
+        const firstBrace = rawText.indexOf('{');
+        const lastBrace = rawText.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          rawText = rawText.substring(firstBrace, lastBrace + 1);
+        }
+
+        let parsed = {};
+        try {
+          parsed = JSON.parse(rawText);
+        } catch {
+          const isFlagged = rawText.includes('"flagged": true');
+          parsed = { flagged: isFlagged, category: isFlagged ? 'SUSPICIOUS_CONTENT' : 'CLEAN', confidence: isFlagged ? 0.85 : 0.1, reason: 'Pattern analyzed (Groq)' };
+        }
+
+        const verdict = {
+          flagged: Boolean(parsed.flagged),
+          category: parsed.category || 'CLEAN',
+          confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (parsed.flagged ? 0.9 : 0.1),
+          reason: parsed.reason || 'Automated policy inspection (Groq backup)',
+          cachedAt: now
+        };
+        this.verdictCache.set(normalized, verdict);
+        return verdict;
+      }
+    } catch (groqErr) {
+      console.warn('[AI MOD] Groq fallback failed:', groqErr.message);
+    }
+    return null;
   }
 
   async executeEnforcement(message, verdict, cfg) {

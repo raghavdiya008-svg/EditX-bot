@@ -258,7 +258,9 @@ class SocialAlertsModule {
   }
 
   async checkFeeds() {
-    for (const [key, alerts] of this.db.entries()) {
+    try {
+      if (!this.db || typeof this.db.entries !== 'function') return;
+      for (const [key, alerts] of this.db.entries()) {
       // 1. YouTube
       if (key.startsWith('yt_') && Array.isArray(alerts)) {
         let updated = false;
@@ -358,7 +360,10 @@ class SocialAlertsModule {
         }
       }
     }
+  } catch (err) {
+    console.warn('[SOCIAL ALERTS ERROR]', err.message);
   }
+}
 
   async checkTwitchStreams(key, alerts, clientId, clientSecret) {
     // 1. Get Twitch App Access Token

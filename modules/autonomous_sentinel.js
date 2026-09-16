@@ -9,6 +9,9 @@
 
 const {
   EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   PermissionFlagsBits,
   ChannelType
 } = require('discord.js');
@@ -215,7 +218,12 @@ class AutonomousSentinelModule {
     }
 
     // 8. Execute Action
+    message._editx_flagged = true;
     await this.executeAction(message, verdict, recentContext);
+    const aimodCfg = this.db.get(`aimod_${message.guild.id}`) || { enabled: true, action: 'REPORT_ONLY' };
+    if (aimodCfg.action === 'REPORT_ONLY' || aimodCfg.action === 'LOG_ONLY') {
+      return false; // In report-only mode, message was not deleted; allow other bot features to proceed
+    }
     return true;
   }
 
@@ -271,7 +279,7 @@ Output strictly valid JSON:
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'groq/compound',
+            model: 'qwen/qwen3.8-27b',
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userPrompt }
@@ -442,7 +450,39 @@ Output strictly valid JSON:
         .setFooter({ text: isReportOnly ? 'EditX Mod Copilot • Mods in Full Control' : 'EditX Autonomous Guardian 24/7' })
         .setTimestamp();
 
-      await logChan.send({ embeds: [embed] }).catch(() => {});
+      const components = [];
+      if (isReportOnly && message.id && message.channel?.id && message.author?.id) {
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`btn_mod_del_${message.channel.id}_${message.id}`)
+            .setLabel('Delete Message')
+            .setEmoji('🗑️')
+            .setStyle(ButtonStyle.Danger),
+          new ButtonBuilder()
+            .setCustomId(`btn_mod_timeout_${message.author.id}_${message.channel.id}_${message.id}`)
+            .setLabel('Timeout (1h)')
+            .setEmoji('⏳')
+            .setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
+            .setCustomId(`btn_mod_ban_${message.author.id}_${message.channel.id}_${message.id}`)
+            .setLabel('Ban Member')
+            .setEmoji('🔨')
+            .setStyle(ButtonStyle.Danger),
+          new ButtonBuilder()
+            .setCustomId(`btn_mod_warn_${message.author.id}_${message.channel.id}_${message.id}`)
+            .setLabel('Warn User')
+            .setEmoji('⚠️')
+            .setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
+            .setCustomId(`btn_mod_dismiss_${message.channel.id}_${message.id}`)
+            .setLabel('Dismiss / Safe')
+            .setEmoji('✅')
+            .setStyle(ButtonStyle.Success)
+        );
+        components.push(row);
+      }
+
+      await logChan.send({ embeds: [embed], components }).catch(() => {});
     } catch (err) {
       console.warn('[SENTINEL REPORT ERROR]', err.message);
     }

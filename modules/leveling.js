@@ -61,8 +61,8 @@ class LevelingModule {
       const nextLevelXP = this.calculateNextLevelXP(data.level);
 
       // Compute Server Rank
-      const allGuildEntries = this.db.entries()
-        .filter(([k]) => k.startsWith(`${guild.id}_`))
+      const allGuildEntries = (this.db.entries ? this.db.entries() : [])
+        .filter(([k, v]) => k.startsWith(`${guild.id}_`) && k.split('_')[1] && v && typeof v.xp === 'number')
         .map(([k, v]) => ({ id: k.split('_')[1], xp: v.xp }))
         .sort((a, b) => b.xp - a.xp);
 
@@ -88,9 +88,9 @@ class LevelingModule {
     }
 
     if (commandName === 'leaderboard') {
-      const allEntries = this.db.entries()
-        .filter(([k]) => k.startsWith(`${guild.id}_`))
-        .map(([k, v]) => ({ userId: k.split('_')[1], xp: v.xp, level: v.level }))
+      const allEntries = (this.db.entries ? this.db.entries() : [])
+        .filter(([k, v]) => k.startsWith(`${guild.id}_`) && k.split('_')[1] && v && typeof v.xp === 'number')
+        .map(([k, v]) => ({ userId: k.split('_')[1], xp: v.xp, level: v.level || 0 }))
         .sort((a, b) => b.xp - a.xp)
         .slice(0, 10);
 

@@ -400,6 +400,49 @@ class AIChatModule {
       }
     }
 
+    // D-0.1. Natural-Language Memory Restore / Backup (Admin only)
+    // Handles: "@EditX restore memory", "@EditX run restore memory", "@EditX backup memory", etc.
+    if (isMentioned && canManageAI && this.botMemory) {
+      const isRestoreMemory = /\b(run\s+)?(restore|load|recover)\s+memory\b/i.test(lower) ||
+                              /\bmemory\s+restore\b/i.test(lower);
+      const isBackupMemory = /\b(run\s+)?(backup|save|snapshot)\s+memory\b/i.test(lower) ||
+                             /\bmemory\s+backup\b/i.test(lower);
+
+      if (isRestoreMemory) {
+        if (typeof message.react === 'function') await message.react('🔄').catch(() => {});
+        const result = await this.botMemory.restoreState(message.guild);
+        if (result && result.success) {
+          await message.reply({
+            content: `✅ **State Restored from Vault!** Synchronized ${result.keysRestored} settings from <#${result.channelId}>.`,
+            allowedMentions: { repliedUser: false }
+          }).catch(() => {});
+        } else {
+          await message.reply({
+            content: `⚠️ **Memory Restore Notice**: ${result?.error || 'No previous snapshot found in #bot-memory.'}`,
+            allowedMentions: { repliedUser: false }
+          }).catch(() => {});
+        }
+        return true;
+      }
+
+      if (isBackupMemory) {
+        if (typeof message.react === 'function') await message.react('💾').catch(() => {});
+        const result = await this.botMemory.backupState(message.guild);
+        if (result && result.success) {
+          await message.reply({
+            content: `✅ **State Vault Backup Created!** Backed up all configurations to <#${result.channelId}>.`,
+            allowedMentions: { repliedUser: false }
+          }).catch(() => {});
+        } else {
+          await message.reply({
+            content: `⚠️ **Memory Backup Notice**: ${result?.error || 'Failed to save snapshot.'}`,
+            allowedMentions: { repliedUser: false }
+          }).catch(() => {});
+        }
+        return true;
+      }
+    }
+
     // D. Check for SERVER REPORT / EXECUTIVE BRIEFING (e.g. "@EditX report me last 12hrs", "@EditX report me about last 12 hrs", "@EditX give me briefing")
 
     const isReportRequest = /\b(report\s+(me|us|server|staff|about|activity)|(give\s+(me\s+)?a\s+)?(briefing|overview|summary|status\s+report))\b/i.test(lower) ||

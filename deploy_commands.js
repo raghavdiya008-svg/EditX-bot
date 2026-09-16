@@ -17,6 +17,16 @@ const LoggingModule = require('./modules/logging');
 const AIModerationModule = require('./modules/ai_moderator');
 const TagsModule = require('./modules/tags');
 const HiringModule = require('./modules/hiring');
+const LevelingModule = require('./modules/leveling');
+const GiveawaysModule = require('./modules/giveaways');
+const StarboardModule = require('./modules/starboard');
+const VerificationModule = require('./modules/verification');
+const SocialAlertsModule = require('./modules/social_alerts');
+const AIChatModule = require('./modules/ai_chat');
+const MusicModule = require('./modules/music');
+const BotMemoryModule = require('./modules/bot_memory');
+const TranslatorModule = require('./modules/translator');
+const HousekeeperModule = require('./modules/housekeeper');
 
 const TOKEN = process.env.DISCORD_TOKEN || process.env.DISCORD_BOT_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || '1538958753670500392';
@@ -56,7 +66,17 @@ const modules = [
   new LoggingModule(dummyClient, dummyDb),
   new AIModerationModule(dummyClient, dummyDb),
   new TagsModule(dummyClient, dummyDb),
-  new HiringModule(dummyClient, dummyDb)
+  new HiringModule(dummyClient, dummyDb),
+  new LevelingModule(dummyClient, dummyDb),
+  new GiveawaysModule(dummyClient, dummyDb),
+  new StarboardModule(dummyClient, dummyDb),
+  new VerificationModule(dummyClient, dummyDb),
+  new SocialAlertsModule(dummyClient, dummyDb),
+  new AIChatModule(dummyClient, dummyDb),
+  new MusicModule(dummyClient),
+  new BotMemoryModule(dummyClient, dummyDb),
+  new TranslatorModule(dummyClient, dummyDb),
+  new HousekeeperModule(dummyClient, dummyDb)
 ];
 
 const allCommands = [];
