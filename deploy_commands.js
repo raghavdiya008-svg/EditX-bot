@@ -99,20 +99,20 @@ async function deploy() {
 
   try {
     if (targetGuildId) {
-      console.log(`\n[GUILD SYNC] Deploying ${allCommands.length} commands directly to Guild ${targetGuildId} for INSTANT (<5s) availability...`);
+      console.log(`\n[GUILD SYNC] Deploying ${allCommands.length} commands to Guild ${targetGuildId} (Instant Availability)...`);
       await rest.put(
         Routes.applicationGuildCommands(CLIENT_ID, targetGuildId),
         { body: allCommands.map(c => c.toJSON()) }
       );
-      console.log(`✅ Successfully deployed ${allCommands.length} commands to Guild ${targetGuildId} (Instant Availability).`);
+      console.log(`✅ Successfully deployed ${allCommands.length} commands to Guild ${targetGuildId}.`);
     }
 
-    console.log(`\n[GLOBAL SYNC] Deploying ${allCommands.length} commands globally to Application ID: ${CLIENT_ID}...`);
+    console.log(`\n[CLEANUP GLOBAL] Clearing global registry to eliminate duplicate slash commands...`);
     await rest.put(
       Routes.applicationCommands(CLIENT_ID),
-      { body: allCommands.map(c => c.toJSON()) }
+      { body: [] }
     );
-    console.log(`✅ Successfully deployed ${allCommands.length} commands Globally.`);
+    console.log(`✅ Global commands cleared successfully (Guarantees zero duplicate commands).`);
   } catch (err) {
     console.error('[ERROR] Failed to deploy slash commands:', err);
   }
