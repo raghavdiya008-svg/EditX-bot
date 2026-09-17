@@ -16,6 +16,8 @@ class UtilityModule {
     this.client = client;
     this.db = db.invites;
     this.utilDb = db.utility;
+    this.recentlyDeletedInvites = new Map(); // guildId -> Map(code -> { inviterId, uses, maxUses, deletedAt })
+    this.vanityCache = new Map(); // guildId -> uses
 
     // Check reminders every 30 seconds
     setInterval(() => this.checkReminders(), 30 * 1000);
@@ -55,6 +57,10 @@ class UtilityModule {
       new SlashCommandBuilder().setName('serverstats').setDescription('Deploy auto-updating server stats counter channels')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator).setDMPermission(false),
 
+      new SlashCommandBuilder().setName('invite').setDescription('Quick check your or another member’s verified invite statistics')
+        .addUserOption(o => o.setName('target').setDescription('Target member to inspect'))
+        .setDMPermission(false),
+
       new SlashCommandBuilder().setName('invites').setDescription('Comprehensive server invite tracking and management')
         .addSubcommand(s => s.setName('check').setDescription('Check your or another member’s detailed invite statistics')
           .addUserOption(o => o.setName('target').setDescription('Target member')))
@@ -68,6 +74,11 @@ class UtilityModule {
           .addIntegerOption(o => o.setName('amount').setDescription('Number of bonus invites to remove').setRequired(true).setMinValue(1)))
         .addSubcommand(s => s.setName('reset').setDescription('Reset invite statistics for a user or entire server')
           .addUserOption(o => o.setName('target').setDescription('Target user (leave empty to reset entire server)')))
+        .addSubcommandGroup(g => g.setName('channel').setDescription('Configure dedicated channel for invite tracking join/leave logs')
+          .addSubcommand(s => s.setName('set').setDescription('Set the invite tracking notification channel')
+            .addChannelOption(o => o.setName('channel').setDescription('Channel to send invite logs').addChannelTypes(ChannelType.GuildText).setRequired(true)))
+          .addSubcommand(s => s.setName('view').setDescription('View current invite tracking channel configuration'))
+          .addSubcommand(s => s.setName('reset').setDescription('Reset invite tracking channel to auto-discovery mode')))
         .addSubcommandGroup(g => g.setName('reward').setDescription('Configure automated role rewards for invite milestones')
           .addSubcommand(s => s.setName('add').setDescription('Add an invite milestone role reward')
             .addIntegerOption(o => o.setName('invites').setDescription('Required real invites').setRequired(true).setMinValue(1))
@@ -483,11 +494,43 @@ class UtilityModule {
     }
 
     // --- INVITE TRACKER SUITE ---
-    if (commandName === 'invites' || commandName === 'add-invites' || commandName === 'remove-invites' || commandName === 'reset-invites' || commandName === 'invites-leaderboard' || commandName === 'invite-rewards') {
+    if (commandName === 'invite' || commandName === 'invites' || commandName === 'add-invites' || commandName === 'remove-invites' || commandName === 'reset-invites' || commandName === 'invites-leaderboard' || commandName === 'invite-rewards') {
       let subGroup = null;
       let sub = null;
       try { subGroup = options.getSubcommandGroup(false); } catch (e) {}
       try { sub = options.getSubcommand(false); } catch (e) {}
+
+      // Channel configuration subcommands
+      if (subGroup === 'channel') {
+        if (sub === 'set') {
+          const targetChan = options.getChannel('channel');
+          this.utilDb.set(`invite_tracker_channel_${guild.id}`, targetChan.id);
+          return interaction.reply({
+            content: `✅ **Invite Tracker Channel Set!**\nAll member join and leave invite notifications will now be routed directly to <#${targetChan.id}>.`,
+            ephemeral: true
+          });
+        }
+        if (sub === 'view') {
+          const activeChan = this.getInviteTrackerChannel(guild);
+          const configuredId = this.utilDb.get(`invite_tracker_channel_${guild.id}`);
+          const inviteCount = this.client.inviteCache?.get(guild.id)?.size || 0;
+          return interaction.reply({
+            content: `🔗 **Invite Tracker Status for ${guild.name}**:\n` +
+              `• **Active Channel:** ${activeChan ? `<#${activeChan.id}>` : '*None (Auto-discovery searching for #invites-tracker / #joins)*'}\n` +
+              `• **Configuration Mode:** ${configuredId ? '`Custom Configured`' : '`Auto-Discovery`'}\n` +
+              `• **Tracked Invite Codes:** \`${inviteCount} active links\`\n` +
+              `• **Commands:** \`/invites check\`, \`/invites leaderboard\`, \`/invites sync\`, \`/invites channel set\``,
+            ephemeral: true
+          });
+        }
+        if (sub === 'reset') {
+          this.utilDb.delete(`invite_tracker_channel_${guild.id}`);
+          return interaction.reply({
+            content: `🔄 **Invite Tracker Channel Reset!** Reverted to auto-discovery mode (detects #invites-tracker, #invite-log, #joins).`,
+            ephemeral: true
+          });
+        }
+      }
 
       if (commandName === 'add-invites' || (commandName === 'invites' && sub === 'add')) {
         const target = options.getUser('target');
@@ -1323,7 +1366,34 @@ class UtilityModule {
     return canvas.toBuffer();
   }
 
-  buildWelcomerEmbed(member, config = {}, type = 'join') {
+  getInviteTrackerChannel(guild) {
+    if (!guild) return null;
+
+    // 1. Explicitly configured channel
+    const configuredId = this.utilDb.get(`invite_tracker_channel_${guild.id}`);
+    if (configuredId && guild.channels?.cache) {
+      const chan = guild.channels.cache.get(configuredId);
+      if (chan) return chan;
+    }
+
+    // 2. Auto-discovery by channel name
+    const channels = guild.channels?.cache ? Array.from(guild.channels.cache.values()).filter(Boolean) : [];
+    const discovered = channels.find(c =>
+      c && c.type === ChannelType.GuildText && (
+        /invite[-_]?tracker/i.test(c.name) ||
+        /invites[-_]?tracker/i.test(c.name) ||
+        /invite[-_]?logs?/i.test(c.name) ||
+        /invites[-_]?logs?/i.test(c.name) ||
+        /^invites$/i.test(c.name) ||
+        /joins?[-_]?logs?/i.test(c.name) ||
+        /member[-_]?logs?/i.test(c.name)
+      )
+    );
+
+    return discovered || null;
+  }
+
+  buildWelcomerEmbed(member, config = {}, type = 'join', inviterInfo = null) {
     const isJoin = type === 'join';
     const guild = member.guild;
     const memberNum = guild?.memberCount || 1;
@@ -1348,6 +1418,10 @@ class UtilityModule {
     const createdTs = member.user?.createdTimestamp ? Math.floor(member.user.createdTimestamp / 1000) : null;
     const accountAgeText = createdTs ? `<t:${createdTs}:R>` : 'Recent';
 
+    const inviterName = inviterInfo?.user ? (inviterInfo.user.globalName || inviterInfo.user.username) : (inviterInfo?.isVanity ? 'Server Vanity' : 'Direct Link');
+    const inviterMention = inviterInfo?.user ? `<@${inviterInfo.user.id}>` : (inviterInfo?.isVanity ? 'Vanity Link' : 'Direct Link');
+    const invitesCount = inviterInfo?.total || 0;
+
     let desc = '';
     if (isJoin) {
       if (config.message && config.message.trim()) {
@@ -1355,10 +1429,16 @@ class UtilityModule {
           .replace(/\{user\}/gi, `<@${member.id}>`)
           .replace(/\{server\}/gi, serverName)
           .replace(/#\{membercount\}/gi, `#${memberNum}`)
-          .replace(/\{membercount\}/gi, `${ordinal}`);
+          .replace(/\{membercount\}/gi, `${ordinal}`)
+          .replace(/\{inviter\}/gi, inviterMention)
+          .replace(/\{inviter\.tag\}/gi, inviterInfo?.user?.tag || inviterName)
+          .replace(/\{inviter\.id\}/gi, inviterInfo?.id || 'unknown')
+          .replace(/\{invites\}/gi, `${invitesCount}`)
+          .replace(/\{code\}/gi, inviterInfo?.code || 'direct');
       } else {
+        const inviterLine = inviterInfo?.user ? `\n> 📨 **Invited By:** ${inviterMention} (\`${invitesCount}\` invites)` : '';
         desc = `Welcome to **${serverName}** — the premier community for video editors, VFX artists, and creative minds.${navSection}\n\n` +
-          `> 👤 **Member Position:** \`#${memberNum}\`　•　📅 **Account Created:** ${accountAgeText}`;
+          `> 👤 **Member Position:** \`#${memberNum}\`　•　📅 **Account Created:** ${accountAgeText}${inviterLine}`;
       }
     } else {
       if (config.leaveMessage && config.leaveMessage.trim()) {
@@ -1366,7 +1446,9 @@ class UtilityModule {
           .replace(/\{user\}/gi, `<@${member.id}>`)
           .replace(/\{server\}/gi, serverName)
           .replace(/#\{membercount\}/gi, `#${memberNum}`)
-          .replace(/\{membercount\}/gi, `${ordinal}`);
+          .replace(/\{membercount\}/gi, `${ordinal}`)
+          .replace(/\{inviter\}/gi, inviterMention)
+          .replace(/\{invites\}/gi, `${invitesCount}`);
       } else {
         desc = `**${username}** has departed from **${serverName}**.\n\n` +
           `> 👥 **Remaining Members:** \`#${memberNum}\``;
@@ -1391,7 +1473,7 @@ class UtilityModule {
     return embed;
   }
 
-  buildWelcomerTextMessage(member, config = {}, type = 'join') {
+  buildWelcomerTextMessage(member, config = {}, type = 'join', inviterInfo = null) {
     const isJoin = type === 'join';
     const guild = member.guild;
     const memberNum = guild?.memberCount || 1;
@@ -1399,21 +1481,9 @@ class UtilityModule {
     const serverName = guild?.name || 'EDITX | The Creative Network';
     const username = member.user?.username || member.displayName || 'Member';
 
-    // Discover server navigation channels dynamically
-    const chanList = guild?.channels?.cache ? Array.from(guild.channels.cache.values()).filter(Boolean) : [];
-    const rolesChan = chanList.find(c => c.name && (c.name.includes('get-roles') || c.name.includes('role') || c.name.includes('verify'))) || null;
-    const rulesChan = chanList.find(c => c.name && (c.name.includes('rule') || c.name.includes('guideline'))) || null;
-    const chatChan = chanList.find(c => c.name && (c.name.includes('general') || c.name.includes('chat') || c.name.includes('lounge') || c.name.includes('discussion'))) || null;
-
-    const navParts = [];
-    if (rolesChan) navParts.push(`🎭 **Roles:** <#${rolesChan.id}>`);
-    if (rulesChan) navParts.push(`📜 **Rules:** <#${rulesChan.id}>`);
-    if (chatChan) navParts.push(`💬 **Chat:** <#${chatChan.id}>`);
-
-    const navLine = navParts.length > 0 ? `\n> ⚡ **Quick Start:** ${navParts.join('  •  ')}` : '';
-
-    const createdTs = member.user?.createdTimestamp ? Math.floor(member.user.createdTimestamp / 1000) : null;
-    const accountAgeText = createdTs ? `<t:${createdTs}:R>` : 'Recent';
+    const inviterName = inviterInfo?.user ? (inviterInfo.user.globalName || inviterInfo.user.username) : (inviterInfo?.isVanity ? 'Server Vanity' : 'Direct Link');
+    const inviterMention = inviterInfo?.user ? `<@${inviterInfo.user.id}>` : (inviterInfo?.isVanity ? 'Vanity Link' : 'Direct Link');
+    const invitesCount = inviterInfo?.total || 0;
 
     if (isJoin) {
       if (config.message && config.message.trim()) {
@@ -1421,8 +1491,14 @@ class UtilityModule {
           .replace(/\{user\}/gi, `<@${member.id}>`)
           .replace(/\{server\}/gi, serverName)
           .replace(/#\{membercount\}/gi, `#${memberNum}`)
-          .replace(/\{membercount\}/gi, `${ordinal}`);
+          .replace(/\{membercount\}/gi, `${ordinal}`)
+          .replace(/\{inviter\}/gi, inviterMention)
+          .replace(/\{inviter\.tag\}/gi, inviterInfo?.user?.tag || inviterName)
+          .replace(/\{inviter\.id\}/gi, inviterInfo?.id || 'unknown')
+          .replace(/\{invites\}/gi, `${invitesCount}`)
+          .replace(/\{code\}/gi, inviterInfo?.code || 'direct');
       }
+      const inviterExtra = inviterInfo?.user ? ` | Invited by **${inviterName}** (${invitesCount} invites)` : '';
       return `🎬 **Welcome <@${member.id}> to ${serverName}!**\n` +
         `> 👤 **Member:** \`#${memberNum}\`　•　📅 **Account Created:** ${accountAgeText}${navLine}`;
     } else {
@@ -1431,7 +1507,9 @@ class UtilityModule {
           .replace(/\{user\}/gi, `<@${member.id}>`)
           .replace(/\{server\}/gi, serverName)
           .replace(/#\{membercount\}/gi, `#${memberNum}`)
-          .replace(/\{membercount\}/gi, `${ordinal}`);
+          .replace(/\{membercount\}/gi, `${ordinal}`)
+          .replace(/\{inviter\}/gi, inviterMention)
+          .replace(/\{invites\}/gi, `${invitesCount}`);
       }
       return `👋 **${username}** has left **${serverName}**. (Remaining: \`#${memberNum}\`)`;
     }
@@ -1471,33 +1549,94 @@ class UtilityModule {
 
   async handleJoin(member) {
     let inviterId = null;
+    let usedCode = null;
+    let isVanity = false;
     let isFake = false;
 
     // Account age check (<24h = fake invite)
-    const accountAgeMs = Date.now() - (member.user.createdTimestamp || Date.now());
+    const accountAgeMs = Date.now() - (member.user?.createdTimestamp || Date.now());
     if (accountAgeMs < 24 * 60 * 60 * 1000) {
       isFake = true;
     }
 
     try {
-      const me = member.guild.members.me || (member.guild.members.fetchMe ? await member.guild.members.fetchMe().catch(() => null) : null);
-      if (me && me.permissions.has(PermissionFlagsBits.ManageGuild)) {
+      const me = member.guild.members?.me || (member.guild.members?.fetchMe ? await member.guild.members.fetchMe().catch(() => null) : null);
+      if (me && (me.permissions?.has(PermissionFlagsBits.ManageGuild) || me.permissions?.has(PermissionFlagsBits.Administrator))) {
         const cachedCodes = this.client.inviteCache?.get(member.guild.id) || new Map();
-        const updatedInvites = await member.guild.invites.fetch().catch(() => null);
-        if (updatedInvites) {
-          for (const [code, inv] of updatedInvites) {
-            const prevUses = cachedCodes.get(code) || 0;
-            if (inv.uses > prevUses) {
-              inviterId = inv.inviter?.id;
-              break;
+        const updatedInvites = await member.guild.invites?.fetch().catch(() => null);
+
+        // Check if vanity URL was used
+        if (member.guild.vanityURLCode) {
+          const vanityData = await member.guild.fetchVanityData().catch(() => null);
+          const cachedVanity = this.vanityCache.get(member.guild.id) || 0;
+          if (vanityData && vanityData.uses > cachedVanity) {
+            isVanity = true;
+            usedCode = vanityData.code;
+            this.vanityCache.set(member.guild.id, vanityData.uses);
+          }
+        }
+
+        if (!isVanity && updatedInvites) {
+          // If cachedCodes was initialized (size > 0), find which invite code had an increase
+          if (cachedCodes.size > 0) {
+            for (const [code, inv] of updatedInvites) {
+              const cached = cachedCodes.get(code);
+              const prevUses = (typeof cached === 'object' ? cached.uses : cached) || 0;
+              if (inv.uses > prevUses) {
+                inviterId = inv.inviter?.id;
+                usedCode = code;
+                break;
+              }
             }
           }
+
+          // If still not found, check single-use / deleted invites!
+          if (!inviterId) {
+            const recentDel = this.recentlyDeletedInvites.get(member.guild.id);
+            if (recentDel && recentDel.size > 0) {
+              const now = Date.now();
+              for (const [delCode, delInfo] of recentDel.entries()) {
+                if (now - delInfo.deletedAt < 30000 && !updatedInvites.has(delCode)) {
+                  inviterId = delInfo.inviterId;
+                  usedCode = delCode;
+                  recentDel.delete(delCode);
+                  break;
+                }
+              }
+            }
+          }
+
+          // If still not found, check which invite from cachedCodes is missing in updatedInvites
+          if (!inviterId && cachedCodes.size > 0) {
+            for (const [cachedCode, cachedVal] of cachedCodes.entries()) {
+              if (!updatedInvites.has(cachedCode)) {
+                const prevUses = typeof cachedVal === 'object' ? cachedVal.uses : cachedVal;
+                const maxUses = typeof cachedVal === 'object' ? cachedVal.maxUses : 0;
+                if (maxUses > 0 && prevUses + 1 >= maxUses) {
+                  inviterId = typeof cachedVal === 'object' ? cachedVal.inviterId : null;
+                  usedCode = cachedCode;
+                  break;
+                }
+              }
+            }
+          }
+
+          // Refresh the cache
           const refreshedMap = new Map();
-          updatedInvites.forEach(inv => refreshedMap.set(inv.code, inv.uses));
+          updatedInvites.forEach(inv => {
+            refreshedMap.set(inv.code, {
+              code: inv.code,
+              uses: inv.uses || 0,
+              maxUses: inv.maxUses || 0,
+              inviterId: inv.inviter?.id || null
+            });
+          });
           this.client.inviteCache.set(member.guild.id, refreshedMap);
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[INVITE TRACKER ERROR]', e.message);
+    }
 
     let inviterUser = null;
     let cleanTotalInvites = 0;
@@ -1526,22 +1665,18 @@ class UtilityModule {
 
     // --- 1. DEDICATED INVITES TRACKER CHANNEL NOTIFICATION ---
     try {
-      const inviteLogChan = Array.from(member.guild.channels.cache.values()).find(c =>
-        c.type === ChannelType.GuildText && (
-          c.name.includes('invites-tracker') ||
-          c.name.includes('invite-tracker') ||
-          c.name.includes('invites') ||
-          c.name.includes('invite-log')
-        )
-      );
+      const inviteLogChan = this.getInviteTrackerChannel(member.guild);
 
       if (inviteLogChan) {
         let inviteReport = '';
         if (inviterId) {
           const inviterDisplayName = inviterUser ? (inviterUser.globalName || inviterUser.username) : `<@${inviterId}>`;
-          inviteReport = `<@${member.id}> has been invited by **${inviterDisplayName}** and has now **${cleanTotalInvites}** invites.`;
+          const fakeTag = isFake ? ' ⚠️ *(Fake: Account <24h old)*' : '';
+          inviteReport = `📥 <@${member.id}> joined! Invited by **${inviterDisplayName}** (now **${cleanTotalInvites}** invites) [Code: \`${usedCode || 'custom'}\`]${fakeTag}`;
+        } else if (isVanity) {
+          inviteReport = `🔗 <@${member.id}> joined using the server vanity invite link (**discord.gg/${usedCode || member.guild.vanityURLCode}**)!`;
         } else {
-          inviteReport = `<@${member.id}> joined using a direct, vanity, or system invite link.`;
+          inviteReport = `❓ <@${member.id}> joined using a direct, vanity, or unknown invite link.`;
         }
         await inviteLogChan.send(inviteReport).catch(() => {});
       }
@@ -1549,15 +1684,29 @@ class UtilityModule {
       console.error('[INVITES TRACKER LOG ERROR]', invErr);
     }
 
+    const inviterInfo = {
+      user: inviterUser,
+      id: inviterId,
+      total: cleanTotalInvites,
+      code: usedCode,
+      isVanity
+    };
+
     // --- 2. WELCOMER CUSTOM DM DISPATCH ---
     let welcomerConfig = this.utilDb.get(`welcomer_${member.guild.id}`) || {};
     if (welcomerConfig.dmEnabled) {
       const defaultDm = `Welcome to **${member.guild.name}**, <@${member.id}>! We're glad to have you here.`;
+      const inviterName = inviterUser ? (inviterUser.globalName || inviterUser.username) : (isVanity ? 'Server Vanity' : 'Direct Link');
       const dmText = (welcomerConfig.dmMessage || defaultDm)
         .replace(/\{user\}/gi, `<@${member.id}>`)
         .replace(/\{server\}/gi, member.guild.name)
         .replace(/#\{membercount\}/gi, `#${member.guild.memberCount || 1}`)
-        .replace(/\{membercount\}/gi, `${member.guild.memberCount || 1}`);
+        .replace(/\{membercount\}/gi, `${member.guild.memberCount || 1}`)
+        .replace(/\{inviter\}/gi, inviterUser ? `<@${inviterUser.id}>` : inviterName)
+        .replace(/\{inviter\.tag\}/gi, inviterUser?.tag || inviterName)
+        .replace(/\{inviter\.id\}/gi, inviterId || 'unknown')
+        .replace(/\{invites\}/gi, `${cleanTotalInvites}`)
+        .replace(/\{code\}/gi, usedCode || 'direct');
 
       member.send(dmText).catch(() => {});
     }
@@ -1605,7 +1754,7 @@ class UtilityModule {
         try {
           const cardBuffer = await this.generateCard(member, welcomerConfig.theme || 'dark', 'join');
           const attachment = new AttachmentBuilder(cardBuffer, { name: 'welcome.png' });
-          const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join');
+          const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join', inviterInfo);
           await channel.send({ content: `<@${member.id}>`, embeds: [embed], files: [attachment] });
           sent = true;
         } catch (cardErr) {
@@ -1616,7 +1765,7 @@ class UtilityModule {
       // 2. Fallback to Luxury Embed without attachment
       if (!sent) {
         try {
-          const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join');
+          const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join', inviterInfo);
           embed.setImage(null);
           await channel.send({ content: `<@${member.id}>`, embeds: [embed] });
           sent = true;
@@ -1628,7 +1777,7 @@ class UtilityModule {
       // 3. Final Fallback to Clean Text Message
       if (!sent) {
         try {
-          const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join');
+          const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join', inviterInfo);
           await channel.send({ content: textMsg });
           sent = true;
         } catch (textErr) {
@@ -1661,20 +1810,17 @@ class UtilityModule {
       await this.checkInviteRewards(member.guild, inviterId);
     }
 
-    // Leave notification in #invites-tracker
+    // Leave notification in #invites-tracker or configured channel
     try {
-      const inviteLogChan = Array.from(member.guild.channels.cache.values()).find(c =>
-        c.type === ChannelType.GuildText && (
-          c.name.includes('invites-tracker') ||
-          c.name.includes('invite-tracker') ||
-          c.name.includes('invites') ||
-          c.name.includes('invite-log')
-        )
-      );
+      const inviteLogChan = this.getInviteTrackerChannel(member.guild);
 
-      if (inviteLogChan && inviterId) {
-        const inviterDisplayName = inviterUser ? (inviterUser.globalName || inviterUser.username) : `<@${inviterId}>`;
-        await inviteLogChan.send(`**${member.user.username || member.user.tag}** left the server. Invited by **${inviterDisplayName}** (now ${cleanTotalInvites} invites).`).catch(() => {});
+      if (inviteLogChan) {
+        if (inviterId) {
+          const inviterDisplayName = inviterUser ? (inviterUser.globalName || inviterUser.username) : `<@${inviterId}>`;
+          await inviteLogChan.send(`🚪 **${member.user?.username || member.user?.tag || member.displayName || 'Member'}** left the server. Invited by **${inviterDisplayName}** (now **${cleanTotalInvites}** invites).`).catch(() => {});
+        } else {
+          await inviteLogChan.send(`🚪 **${member.user?.username || member.user?.tag || member.displayName || 'Member'}** left the server. (Invite source untracked or vanity link).`).catch(() => {});
+        }
       }
     } catch (e) {}
 
@@ -1682,10 +1828,11 @@ class UtilityModule {
     const welcomerConfig = this.utilDb.get(`welcomer_${member.guild.id}`) || {};
     if (welcomerConfig.leaveEnabled) {
       const leaveChanId = welcomerConfig.leaveChannelId || welcomerConfig.channelId;
-      const leaveChannel = leaveChanId ? member.guild.channels.cache.get(leaveChanId) : member.guild.systemChannel;
+      const leaveChannel = leaveChanId ? member.guild.channels.cache?.get(leaveChanId) : member.guild.systemChannel;
 
       if (leaveChannel) {
-        const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'leave');
+        const inviterInfo = { user: inviterUser, id: inviterId, total: cleanTotalInvites };
+        const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'leave', inviterInfo);
         if (welcomerConfig.leaveCardEnabled !== false) {
           try {
             const cardBuffer = await this.generateCard(member, welcomerConfig.theme || 'dark', 'leave');
@@ -1786,14 +1933,77 @@ class UtilityModule {
       return true;
     }
 
-    if (content === '!invites' || content === '!invites check' || content === '/invites check' || content === '!invites-check') {
+    // Plain text invite channel configuration: !invites channel <#channel> or !invites channel reset
+    if (content.startsWith('!invites channel') || content.startsWith('!invite channel')) {
+      const isStaff = message.member?.permissions?.has(PermissionFlagsBits.ManageGuild) ||
+                      message.member?.permissions?.has(PermissionFlagsBits.Administrator) ||
+                      message.author.id === message.guild.ownerId;
+      if (!isStaff) {
+        await message.reply('⚠️ Only staff or administrators can configure the invite tracking channel.').catch(() => {});
+        return true;
+      }
+
+      if (content.includes('reset') || content.includes('disable')) {
+        this.utilDb.delete(`invite_tracker_channel_${message.guild.id}`);
+        await message.reply('🔄 **Invite Tracker Channel Reset!** Reverted to auto-discovery mode (detects `#invites-tracker`, `#invite-log`, `#joins`).').catch(() => {});
+        return true;
+      }
+
+      const targetChan = message.mentions.channels?.first();
+      if (targetChan) {
+        this.utilDb.set(`invite_tracker_channel_${message.guild.id}`, targetChan.id);
+        await message.reply(`✅ **Invite Tracker Channel Set!** All join/leave notifications will be sent to <#${targetChan.id}>.`).catch(() => {});
+        return true;
+      }
+
+      const activeChan = this.getInviteTrackerChannel(message.guild);
+      await message.reply(`🔗 **Current Invite Tracker Channel:** ${activeChan ? `<#${activeChan.id}>` : '*Auto-discovery searching for #invites-tracker / #joins*'}\n*To set a channel, run:* \`!invites channel #your-channel\` or \`/invites channel set\``).catch(() => {});
+      return true;
+    }
+
+    // Plain text leaderboard: !invites leaderboard, !invites top, !top invites
+    if (content === '!invites leaderboard' || content === '!invites top' || content === '!top invites' || content === '!invites-leaderboard') {
+      const prefix = `${message.guild.id}_`;
+      const entries = [];
+
+      for (const [k, v] of this.db.entries()) {
+        if (k.startsWith(prefix) && !k.startsWith('invitedBy_') && !k.startsWith('invite_rewards_')) {
+          const userId = k.replace(prefix, '');
+          const bonus = v.bonus || 0;
+          const total = (v.regular || 0) - (v.leaves || 0) - (v.fake || 0) + bonus;
+          if (total > 0 || (v.regular || 0) > 0) {
+            entries.push({ userId, total, regular: v.regular || 0, leaves: v.leaves || 0, fake: v.fake || 0, bonus });
+          }
+        }
+      }
+
+      entries.sort((a, b) => b.total - a.total);
+      const top10 = entries.slice(0, 10);
+
+      const embed = new EmbedBuilder().setColor(0xF59E0B)
+        .setAuthor({ name: 'Server Leaderboard', iconURL: message.guild.iconURL() })
+        .setTitle(`🏆 Top Inviters • ${message.guild.name}`)
+        .setDescription(top10.length > 0
+          ? top10.map((e, idx) => {
+              const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `\`#${idx + 1}\``;
+              return `${medal} <@${e.userId}>\n　└ **${e.total} real** • *${e.regular} joins • ${e.leaves} leaves • ${e.bonus} bonus*`;
+            }).join('\n\n') + '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+          : 'No invites recorded yet.')
+        .setFooter({ text: 'Formula: Real Invites = Regular - Leaves - Fake + Bonus' })
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] }).catch(() => {});
+      return true;
+    }
+
+    if (content === '!invite' || content === '!invites' || content === '!inv' || content.startsWith('!invite ') || content.startsWith('!invites ') || content === '!invites check' || content === '/invites check' || content === '!invites-check') {
       const target = message.mentions.users?.first() || message.author;
       const data = this.db.get(`${message.guild.id}_${target.id}`) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
       const bonus = data.bonus || 0;
       const total = data.regular - data.leaves - data.fake + bonus;
 
       const embed = new EmbedBuilder().setColor(0x10B981)
-        .setAuthor({ name: `${target.tag} • Invite Portfolio`, iconURL: target.displayAvatarURL() })
+        .setAuthor({ name: `${target.tag || target.username} • Invite Portfolio`, iconURL: target.displayAvatarURL() })
         .setTitle('📨 Verified Invite Statistics')
         .setDescription(
           `**Total Real Invites:** \`${total} Invites\`\n` +
@@ -1815,34 +2025,75 @@ class UtilityModule {
   }
 
   handleInviteCreate(invite) {
-    if (!invite.guild) return;
-    const codeMap = this.client.inviteCache.get(invite.guild.id) || new Map();
-    codeMap.set(invite.code, invite.uses);
-    this.client.inviteCache.set(invite.guild.id, codeMap);
+    if (!invite?.guild) return;
+    const guildId = invite.guild.id;
+    const codeMap = this.client.inviteCache.get(guildId) || new Map();
+    codeMap.set(invite.code, {
+      code: invite.code,
+      uses: invite.uses || 0,
+      maxUses: invite.maxUses || 0,
+      inviterId: invite.inviter?.id || null
+    });
+    this.client.inviteCache.set(guildId, codeMap);
   }
 
   handleInviteDelete(invite) {
-    if (!invite.guild) return;
-    const codeMap = this.client.inviteCache.get(invite.guild.id);
-    if (codeMap) codeMap.delete(invite.code);
+    if (!invite?.guild) return;
+    const guildId = invite.guild.id;
+    const codeMap = this.client.inviteCache.get(guildId);
+    if (codeMap && codeMap.has(invite.code)) {
+      const cached = codeMap.get(invite.code);
+      if (!this.recentlyDeletedInvites.has(guildId)) {
+        this.recentlyDeletedInvites.set(guildId, new Map());
+      }
+      this.recentlyDeletedInvites.get(guildId).set(invite.code, {
+        inviterId: typeof cached === 'object' ? cached.inviterId : null,
+        uses: typeof cached === 'object' ? cached.uses : cached,
+        maxUses: typeof cached === 'object' ? cached.maxUses : 1,
+        deletedAt: Date.now()
+      });
+      codeMap.delete(invite.code);
+    }
   }
 
   async handleGuildCreate(guild) {
+    if (!guild) return;
     try {
-      const me = guild.members.me;
-      if (me?.permissions.has(PermissionFlagsBits.ManageGuild)) {
-        const invites = await guild.invites.fetch().catch(() => null);
+      const me = guild.members?.me || (guild.members?.fetchMe ? await guild.members.fetchMe().catch(() => null) : null);
+      if (me && (me.permissions?.has(PermissionFlagsBits.ManageGuild) || me.permissions?.has(PermissionFlagsBits.Administrator))) {
+        const invites = await guild.invites?.fetch().catch(() => null);
         if (invites) {
           const codeMap = new Map();
-          invites.forEach(inv => codeMap.set(inv.code, inv.uses));
+          invites.forEach(inv => {
+            codeMap.set(inv.code, {
+              code: inv.code,
+              uses: inv.uses || 0,
+              maxUses: inv.maxUses || 0,
+              inviterId: inv.inviter?.id || null
+            });
+          });
           this.client.inviteCache.set(guild.id, codeMap);
+          console.log(`[INVITE TRACKER] ✅ Cached ${codeMap.size} invite codes for guild: ${guild.name}`);
         }
+        if (guild.vanityURLCode) {
+          const vanityData = await guild.fetchVanityData().catch(() => null);
+          if (vanityData) {
+            this.vanityCache.set(guild.id, vanityData.uses || 0);
+          }
+        }
+      } else {
+        console.warn(`[INVITE TRACKER] ⚠️ Bot lacks 'Manage Server' (MANAGE_GUILD) permission in "${guild.name}". Live invite detection requires Manage Server permission.`);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn(`[INVITE TRACKER] Could not cache invites for ${guild.name}:`, e.message);
+    }
   }
 
   handleGuildDelete(guild) {
+    if (!guild) return;
     this.client.inviteCache.delete(guild.id);
+    this.recentlyDeletedInvites.delete(guild.id);
+    this.vanityCache.delete(guild.id);
   }
 
   /**

@@ -313,6 +313,96 @@ async function runTests() {
     assert.ok(mockMember.roles.cache.has('role_vip'));
   });
 
+  // 4b. INVITE TRACKER LIVE LIFECYCLE & RESOLUTION
+  await test('UtilityModule - Invite Tracker Live Lifecycle (Join Detection, Single-Use Codes, Leave Tracking & Welcomer Placeholders)', async () => {
+    const util = new UtilityModule(mockClient, db);
+
+    let inviteLogMessages = [];
+    const inviteLogChan = {
+      id: 'inv_track_chan_99',
+      name: 'invites-tracker',
+      type: 0, // GuildText
+      send: async (msg) => {
+        inviteLogMessages.push(typeof msg === 'string' ? msg : msg.content || '');
+        return { id: `msg_${Date.now()}` };
+      }
+    };
+    mockGuild.channels.cache.set(inviteLogChan.id, inviteLogChan);
+
+    const guildInvites = new Map([
+      ['code_alpha', { code: 'code_alpha', uses: 2, maxUses: 0, inviter: { id: 'inviter_10', username: 'SuperInviter' } }],
+      ['code_single', { code: 'code_single', uses: 0, maxUses: 1, inviter: { id: 'inviter_single', username: 'SingleInviter' } }]
+    ]);
+    mockGuild.invites = {
+      fetch: async () => guildInvites
+    };
+
+    // 1. Initial Guild Cache Populating
+    await util.handleGuildCreate(mockGuild);
+    const cached = mockClient.inviteCache.get(mockGuild.id);
+    assert.ok(cached, 'Invite cache must be populated for guild');
+    assert.strictEqual(cached.size, 2);
+
+    // 2. Member Joins with Regular Multi-Use Invite
+    guildInvites.get('code_alpha').uses = 3;
+    const joinerOne = {
+      id: 'joiner_1',
+      user: { id: 'joiner_1', username: 'JoinerOne', createdTimestamp: Date.now() - 50 * 24 * 3600 * 1000 },
+      guild: mockGuild,
+      send: async () => {}
+    };
+    await util.handleJoin(joinerOne);
+
+    assert.strictEqual(db.invites.get(`invitedBy_${mockGuild.id}_joiner_1`), 'inviter_10');
+    const inviterStats = db.invites.get(`${mockGuild.id}_inviter_10`);
+    assert.strictEqual(inviterStats.regular, 1);
+    assert.ok(inviteLogMessages.some(m => m.includes('<@joiner_1>') && m.includes('code_alpha')));
+
+    // 3. Member Joins with Single-Use Invite (code disappears upon join)
+    guildInvites.delete('code_single');
+    const singleJoiner = {
+      id: 'joiner_single',
+      user: { id: 'joiner_single', username: 'SingleJoiner', createdTimestamp: Date.now() - 50 * 24 * 3600 * 1000 },
+      guild: mockGuild,
+      send: async () => {}
+    };
+    await util.handleJoin(singleJoiner);
+
+    assert.strictEqual(db.invites.get(`invitedBy_${mockGuild.id}_joiner_single`), 'inviter_single');
+    const singleInviterStats = db.invites.get(`${mockGuild.id}_inviter_single`);
+    assert.strictEqual(singleInviterStats.regular, 1);
+
+    // 4. Member Leaves the Server
+    await util.handleLeave(joinerOne);
+    const updatedStats = db.invites.get(`${mockGuild.id}_inviter_10`);
+    assert.ok(inviteLogMessages.some(m => m.includes('left the server') && m.includes('**0** invites')));
+
+    // 5. Welcomer Variable Substitution ({inviter}, {invites}, {code})
+    const welcomeMsg = util.buildWelcomerTextMessage(joinerOne, {
+      message: 'Welcome {user} to {server}! Invited by {inviter} ({invites} invites) [Code: {code}]'
+    }, 'join', { user: { id: 'inviter_10', username: 'SuperInviter' }, total: 5, code: 'code_alpha' });
+
+    assert.ok(welcomeMsg.includes('<@inviter_10>'));
+    assert.ok(welcomeMsg.includes('5 invites'));
+    assert.ok(welcomeMsg.includes('Code: code_alpha'));
+
+    // 6. Channel Configuration Subcommand
+    let repliedPayload = '';
+    const mockChannelInteraction = {
+      commandName: 'invites',
+      guild: mockGuild,
+      options: {
+        getSubcommandGroup: () => 'channel',
+        getSubcommand: () => 'set',
+        getChannel: () => inviteLogChan
+      },
+      reply: async (p) => { repliedPayload = p.content; }
+    };
+    await util.handleCommand(mockChannelInteraction);
+    assert.strictEqual(db.utility.get(`invite_tracker_channel_${mockGuild.id}`), inviteLogChan.id);
+    assert.ok(repliedPayload.includes('Invite Tracker Channel Set'));
+  });
+
   // 5. WELCOMER CANVAS CARD RENDERING
   await test('UtilityModule - Canvas Graphic Card Generation (Themes: Dark, Gradient, Cyberpunk)', async () => {
     const util = new UtilityModule(mockClient, db);

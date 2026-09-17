@@ -20,7 +20,16 @@ An enterprise-grade, all-in-one Discord management, moderation, and community en
 ### 3. 👋 Luxury Graphic Welcomer & Invite Tracker (`modules/utility.js`)
 - **Canvas Card Engine**: Renders 760x210 high-resolution obsidian glass cards with avatar rings and typography.
 - **Welcome Desk Embed**: Displays welcome header, member position count (`#146`), account creation date, and channel navigation shortcuts.
-- **Real Invites Ledger**: Accurate invite calculation (`real = regular + bonus - leaves - fake`) logged directly to `#invites-tracker`.
+- **Real Invites Ledger**: Accurate invite calculation (`real = regular + bonus - leaves - fake`) logged directly to `#invites-tracker` or custom configured channel.
+- **Invite Tracking Suite**:
+  - `/invite [user]` • Instant invite portfolio check
+  - `/invites check [user]` • Detailed breakdown (Regular, Leaves, Fake <24h, Bonus)
+  - `/invites leaderboard` • Top server inviters ranking
+  - `/invites channel set <channel>` • Set custom logging channel (`!invites channel #chan`)
+  - `/invites sync` • Reconstruct and reconcile historical invite statistics
+  - Single-use (`maxUses: 1`), vanity link, and re-join tracking
+  - Welcomer variables support: `{inviter}`, `{inviter.tag}`, `{inviter.id}`, `{invites}`, `{code}`
+
 
 ### 4. 📌 Persistent Sticky Notices & TagScript (`modules/tags.js`)
 - **Persistent Sticky Messages (`/sticky`)**: Pins channel notices that automatically re-anchor to the bottom of the feed as members chat.
