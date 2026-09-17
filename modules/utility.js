@@ -58,6 +58,7 @@ class UtilityModule {
       new SlashCommandBuilder().setName('invites').setDescription('Comprehensive server invite tracking and management')
         .addSubcommand(s => s.setName('check').setDescription('Check your or another member’s detailed invite statistics')
           .addUserOption(o => o.setName('target').setDescription('Target member')))
+        .addSubcommand(s => s.setName('sync').setDescription('Reconstruct and sync invite portfolio from #invites-tracker, #modlogs & server invites'))
         .addSubcommand(s => s.setName('leaderboard').setDescription('Display the top server inviters leaderboard'))
         .addSubcommand(s => s.setName('add').setDescription('Manually grant bonus invites to a server member')
           .addUserOption(o => o.setName('target').setDescription('Target member').setRequired(true))
@@ -75,6 +76,7 @@ class UtilityModule {
             .addIntegerOption(o => o.setName('invites').setDescription('Milestone invite count to delete').setRequired(true)))
           .addSubcommand(s => s.setName('list').setDescription('List all active invite role rewards')))
         .setDMPermission(false),
+
 
       new SlashCommandBuilder().setName('userinfo').setDescription('Inspect detailed profile and account statistics of a member')
         .addUserOption(o => o.setName('target').setDescription('Target user'))
@@ -527,7 +529,23 @@ class UtilityModule {
         }
       }
 
+      if (commandName === 'invites' && sub === 'sync') {
+        await interaction.deferReply({ ephemeral: false });
+        const res = await this.syncInvitesFromChannelsAndAuditLogs(guild);
+        if (res.success) {
+          return interaction.editReply({
+            content: `✅ **Invite Portfolio Synchronized & Reconciled!**\n` +
+              `• Channels Scanned: \`${res.totalChannelsScanned}\` (#invites-tracker, #modlogs, #welcome-hub)\n` +
+              `• Inviters Synchronized: \`${res.syncedInviters}\`\n` +
+              `• Backed up directly into \`#🤖・bot-memory\` vault.`
+          });
+        } else {
+          return interaction.editReply({ content: `❌ Sync failed: ${res.error}` });
+        }
+      }
+
       if (commandName === 'invites-leaderboard' || (commandName === 'invites' && sub === 'leaderboard')) {
+
         const prefix = `${guild.id}_`;
         const entries = [];
 
@@ -1764,6 +1782,139 @@ class UtilityModule {
   handleGuildDelete(guild) {
     this.client.inviteCache.delete(guild.id);
   }
+
+  /**
+   * Scans #invites-tracker, #modlogs, and live guild invites to reconstruct and synchronize all invite statistics.
+   */
+  async syncInvitesFromChannelsAndAuditLogs(guild) {
+    if (!guild) return { success: false, error: 'Guild required' };
+
+    let syncedCount = 0;
+    const inviterMap = new Map(); // userId -> { regular, leaves, fake, bonus }
+
+    // 1. Fetch live guild invites from Discord API
+    try {
+      const invites = await guild.invites?.fetch().catch(() => null);
+      if (invites && invites.size > 0) {
+        for (const [code, inv] of invites) {
+          if (inv.inviter?.id) {
+            const uId = inv.inviter.id;
+            const current = inviterMap.get(uId) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
+            current.regular += (inv.uses || 0);
+            inviterMap.set(uId, current);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[INVITES SYNC] Could not fetch live guild invites:', e.message);
+    }
+
+    // 2. Scan channel history from #invites-tracker, #modlogs, #joins, #welcome-hub
+    const targetChannels = Array.from(guild.channels.cache.values()).filter(c =>
+      c.type === ChannelType.GuildText && (
+        c.name.includes('invites-tracker') ||
+        c.name.includes('invite-tracker') ||
+        c.name.includes('invites') ||
+        c.name.includes('modlogs') ||
+        c.name.includes('mod-log') ||
+        c.name.includes('welcome')
+      )
+    );
+
+    const parsedJoinedUsers = new Set();
+
+    for (const chan of targetChannels) {
+      try {
+        let lastId = null;
+        for (let batch = 0; batch < 5; batch++) {
+          const options = { limit: 100 };
+          if (lastId) options.before = lastId;
+
+          const messages = await chan.messages.fetch(options).catch(() => null);
+          if (!messages || messages.size === 0) break;
+
+          for (const msg of messages.values()) {
+            lastId = msg.id;
+            const content = msg.content || '';
+
+            // Pattern 1: "<@joinedId> has been invited by **Name** (<@inviterId>) and has now X invites"
+            const inviteMatch = content.match(/<@!?(\d{17,20})>\s+has been invited by\s+(?:\*\*(.*?)\*\*\s+)?(?:\(?<@!?(\d{17,20})>\)?)?/i);
+            if (inviteMatch) {
+              const joinedId = inviteMatch[1];
+              const inviterId = inviteMatch[3];
+              if (joinedId && !parsedJoinedUsers.has(joinedId)) {
+                parsedJoinedUsers.add(joinedId);
+                if (inviterId) {
+                  this.db.set(`invitedBy_${guild.id}_${joinedId}`, inviterId);
+                  const cur = inviterMap.get(inviterId) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
+                  cur.regular = Math.max(cur.regular, 1);
+                  inviterMap.set(inviterId, cur);
+                }
+              }
+            }
+
+            // Pattern 2: Member left message ("<@userId> has left" or "departed")
+            const leaveMatch = content.match(/<@!?(\d{17,20})>\s+(?:has left|departed|left the server)/i);
+            if (leaveMatch) {
+              const leftUserId = leaveMatch[1];
+              const inviterOfLeft = this.db.get(`invitedBy_${guild.id}_${leftUserId}`);
+              if (inviterOfLeft) {
+                const cur = inviterMap.get(inviterOfLeft) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
+                cur.leaves = (cur.leaves || 0) + 1;
+                inviterMap.set(inviterOfLeft, cur);
+              }
+            }
+
+            // Pattern 3: Embed logs (e.g. from Wick, ProBot, Carl, or EditX)
+            if (msg.embeds && msg.embeds.length > 0) {
+              for (const emb of msg.embeds) {
+                const embText = `${emb.title || ''} ${emb.description || ''} ${(emb.fields || []).map(f => `${f.name} ${f.value}`).join(' ')}`;
+                const embInvMatch = embText.match(/(?:Invited by|Inviter)[:\s]+(?:<@!?)?(\d{17,20})>?/i);
+                const embUserMatch = embText.match(/(?:User|Member|Joined)[:\s]+(?:<@!?)?(\d{17,20})>?/i);
+
+                if (embInvMatch && embInvMatch[1]) {
+                  const inviterId = embInvMatch[1];
+                  const cur = inviterMap.get(inviterId) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
+                  cur.regular += 1;
+                  inviterMap.set(inviterId, cur);
+                  if (embUserMatch && embUserMatch[1]) {
+                    this.db.set(`invitedBy_${guild.id}_${embUserMatch[1]}`, inviterId);
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (cErr) {
+        console.warn(`[INVITES SYNC] Could not scan messages from #${chan.name}:`, cErr.message);
+      }
+    }
+
+    // 3. Merge with existing database bonus/stats without dropping manual bonuses
+    for (const [userId, stats] of inviterMap.entries()) {
+      const key = `${guild.id}_${userId}`;
+      const existing = this.db.get(key) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
+      existing.regular = Math.max(existing.regular || 0, stats.regular || 0);
+      existing.leaves = Math.max(existing.leaves || 0, stats.leaves || 0);
+      existing.fake = existing.fake || stats.fake || 0;
+      existing.bonus = existing.bonus || 0;
+
+      this.db.set(key, existing);
+      syncedCount++;
+    }
+
+    // 4. Force immediate state backup into #bot-memory
+    if (this.client.botMemory && typeof this.client.botMemory.backupState === 'function') {
+      await this.client.botMemory.backupState(guild).catch(() => {});
+    }
+
+    return {
+      success: true,
+      syncedInviters: syncedCount,
+      totalChannelsScanned: targetChannels.length
+    };
+  }
 }
 
 module.exports = UtilityModule;
+
