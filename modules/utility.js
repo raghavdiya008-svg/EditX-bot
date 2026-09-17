@@ -1862,7 +1862,7 @@ class UtilityModule {
           if (inv.inviter?.id) {
             const uId = inv.inviter.id;
             const current = inviterMap.get(uId) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
-            current.regular += (inv.uses || 0);
+            current.regular = Math.max(current.regular, (inv.uses || 0));
             inviterMap.set(uId, current);
           }
         }
@@ -1871,15 +1871,18 @@ class UtilityModule {
       console.warn('[INVITES SYNC] Could not fetch live guild invites:', e.message);
     }
 
-    // 2. Scan channel history from #invites-tracker, #modlogs, #joins, #welcome-hub
-    const targetChannels = Array.from(guild.channels.cache.values()).filter(c =>
-      c.type === ChannelType.GuildText && (
-        c.name.includes('invites-tracker') ||
-        c.name.includes('invite-tracker') ||
-        c.name.includes('invites') ||
-        c.name.includes('modlogs') ||
-        c.name.includes('mod-log') ||
-        c.name.includes('welcome')
+    // 2. Fetch and find all relevant log and invite channels
+    let allChannels = Array.from(guild.channels.cache.values());
+    if (guild.channels.fetch) {
+      try {
+        const fetched = await guild.channels.fetch().catch(() => null);
+        if (fetched) allChannels = Array.from(fetched.values());
+      } catch (err) {}
+    }
+
+    const targetChannels = allChannels.filter(c =>
+      c && c.type === ChannelType.GuildText && (
+        /invite|track|join|leave|welcome|mod-?log|audit|gate|member-log|server-log/i.test(c.name)
       )
     );
 
@@ -1888,7 +1891,7 @@ class UtilityModule {
     for (const chan of targetChannels) {
       try {
         let lastId = null;
-        for (let batch = 0; batch < 5; batch++) {
+        for (let batch = 0; batch < 10; batch++) {
           const options = { limit: 100 };
           if (lastId) options.before = lastId;
 
@@ -1900,7 +1903,7 @@ class UtilityModule {
             const content = msg.content || '';
 
             // Pattern 1: "<@joinedId> has been invited by **Name** (<@inviterId>) and has now X invites"
-            const inviteMatch = content.match(/<@!?(\d{17,20})>\s+has been invited by\s+(?:\*\*(.*?)\*\*\s+)?(?:\(?<@!?(\d{17,20})>\)?)?/i);
+            const inviteMatch = content.match(/<@!?(\d{17,20})>\s+(?:has been invited by|was invited by|invited by)\s+(?:\*\*(.*?)\*\*\s+)?(?:\(?<@!?(\d{17,20})>\)?)?/i);
             if (inviteMatch) {
               const joinedId = inviteMatch[1];
               const inviterId = inviteMatch[3];
@@ -1909,13 +1912,28 @@ class UtilityModule {
                 if (inviterId) {
                   this.db.set(`invitedBy_${guild.id}_${joinedId}`, inviterId);
                   const cur = inviterMap.get(inviterId) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
-                  cur.regular = Math.max(cur.regular, 1);
+                  cur.regular += 1;
                   inviterMap.set(inviterId, cur);
                 }
               }
             }
 
-            // Pattern 2: Member left message ("<@userId> has left" or "departed")
+            // Pattern 2: Detailed stats in text "(X regular, Y leaves, Z fake, W bonus)" or "(X invites)"
+            const statsMatch = content.match(/(\d+)\s+(?:regular|invites?)[\s,\/]+(\d+)\s+leaves?[\s,\/]+(\d+)\s+fake/i);
+            const inviterMention = content.match(/(?:invited by|inviter)[:\s]+(?:<@!?)?(\d{17,20})>?/i);
+            if (statsMatch && inviterMention) {
+              const invId = inviterMention[1];
+              const reg = parseInt(statsMatch[1], 10) || 0;
+              const lvs = parseInt(statsMatch[2], 10) || 0;
+              const fk = parseInt(statsMatch[3], 10) || 0;
+              const cur = inviterMap.get(invId) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
+              cur.regular = Math.max(cur.regular, reg);
+              cur.leaves = Math.max(cur.leaves, lvs);
+              cur.fake = Math.max(cur.fake, fk);
+              inviterMap.set(invId, cur);
+            }
+
+            // Pattern 3: Member left message ("<@userId> has left" or "departed")
             const leaveMatch = content.match(/<@!?(\d{17,20})>\s+(?:has left|departed|left the server)/i);
             if (leaveMatch) {
               const leftUserId = leaveMatch[1];
@@ -1927,18 +1945,26 @@ class UtilityModule {
               }
             }
 
-            // Pattern 3: Embed logs (e.g. from Wick, ProBot, Carl, or EditX)
+            // Pattern 4: Rich Embed logs (Invite Tracker, Wick, ProBot, Carl, EditX)
             if (msg.embeds && msg.embeds.length > 0) {
               for (const emb of msg.embeds) {
                 const embText = `${emb.title || ''} ${emb.description || ''} ${(emb.fields || []).map(f => `${f.name} ${f.value}`).join(' ')}`;
-                const embInvMatch = embText.match(/(?:Invited by|Inviter)[:\s]+(?:<@!?)?(\d{17,20})>?/i);
-                const embUserMatch = embText.match(/(?:User|Member|Joined)[:\s]+(?:<@!?)?(\d{17,20})>?/i);
+                const embInvMatch = embText.match(/(?:Invited by|Inviter|Invited By)[:\s]+(?:<@!?)?(\d{17,20})>?/i);
+                const embUserMatch = embText.match(/(?:User|Member|Joined|Account)[:\s]+(?:<@!?)?(\d{17,20})>?/i);
+                const embDetailedStats = embText.match(/(\d+)\s*(?:regular|invites?)[,\s\/]+(\d+)\s*leaves?[,\s\/]+(\d+)\s*fake/i);
 
                 if (embInvMatch && embInvMatch[1]) {
                   const inviterId = embInvMatch[1];
                   const cur = inviterMap.get(inviterId) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
-                  cur.regular += 1;
+                  if (embDetailedStats) {
+                    cur.regular = Math.max(cur.regular, parseInt(embDetailedStats[1], 10) || 0);
+                    cur.leaves = Math.max(cur.leaves, parseInt(embDetailedStats[2], 10) || 0);
+                    cur.fake = Math.max(cur.fake, parseInt(embDetailedStats[3], 10) || 0);
+                  } else {
+                    cur.regular += 1;
+                  }
                   inviterMap.set(inviterId, cur);
+
                   if (embUserMatch && embUserMatch[1]) {
                     this.db.set(`invitedBy_${guild.id}_${embUserMatch[1]}`, inviterId);
                   }
@@ -1952,20 +1978,36 @@ class UtilityModule {
       }
     }
 
-    // 3. Merge with existing database bonus/stats without dropping manual bonuses
+    // 3. Scan Server Audit Logs if available
+    try {
+      if (guild.fetchAuditLogs) {
+        const auditLogs = await guild.fetchAuditLogs({ limit: 50 }).catch(() => null);
+        if (auditLogs && auditLogs.entries) {
+          for (const entry of auditLogs.entries.values()) {
+            if (entry.action === 40 && entry.executor?.id) { // INVITE_CREATE
+              const uId = entry.executor.id;
+              const cur = inviterMap.get(uId) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
+              inviterMap.set(uId, cur);
+            }
+          }
+        }
+      }
+    } catch (aErr) {}
+
+    // 4. Merge with existing database without dropping manual bonuses
     for (const [userId, stats] of inviterMap.entries()) {
       const key = `${guild.id}_${userId}`;
       const existing = this.db.get(key) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
       existing.regular = Math.max(existing.regular || 0, stats.regular || 0);
       existing.leaves = Math.max(existing.leaves || 0, stats.leaves || 0);
-      existing.fake = existing.fake || stats.fake || 0;
+      existing.fake = Math.max(existing.fake || 0, stats.fake || 0);
       existing.bonus = existing.bonus || 0;
 
       this.db.set(key, existing);
       syncedCount++;
     }
 
-    // 4. Force immediate state backup into #bot-memory
+    // 5. Force immediate state backup into #bot-memory
     if (this.client.botMemory && typeof this.client.botMemory.backupState === 'function') {
       await this.client.botMemory.backupState(guild).catch(() => {});
     }
