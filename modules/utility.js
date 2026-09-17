@@ -1752,6 +1752,68 @@ class UtilityModule {
     }
   }
 
+  async checkMessage(message) {
+    if (!message.guild || message.author.bot) return false;
+    const content = (message.content || '').trim().toLowerCase();
+
+    // Plain text / prefix command fallbacks
+    if (content === '!invites sync' || content === '!sync-invites' || content === '!sync invites' || content === '/invites sync' || content === '!invites-sync') {
+      const isStaff = message.member?.permissions?.has(PermissionFlagsBits.ManageGuild) ||
+                      message.member?.permissions?.has(PermissionFlagsBits.Administrator) ||
+                      message.author.id === message.guild.ownerId;
+      if (!isStaff) {
+        await message.reply('⚠️ Only staff / administrators can trigger invite portfolio reconciliation.').catch(() => {});
+        return true;
+      }
+
+      const statusMsg = await message.reply('🔄 **Scanning server logs & invites... Reconciling invite portfolio...**').catch(() => null);
+      const res = await this.syncInvitesFromChannelsAndAuditLogs(message.guild);
+      if (res.success) {
+        const replyText = `✅ **Invite Portfolio Synchronized & Reconciled!**\n` +
+          `• Channels Scanned: \`${res.totalChannelsScanned}\` (#invites-tracker, #modlogs, #welcome-hub)\n` +
+          `• Inviters Synchronized: \`${res.syncedInviters}\`\n` +
+          `• Backed up directly into \`#🤖・bot-memory\` vault.`;
+        if (statusMsg) {
+          await statusMsg.edit(replyText).catch(() => {});
+        } else {
+          await message.channel.send(replyText).catch(() => {});
+        }
+      } else {
+        const failText = `❌ Sync failed: ${res.error}`;
+        if (statusMsg) await statusMsg.edit(failText).catch(() => {});
+        else await message.channel.send(failText).catch(() => {});
+      }
+      return true;
+    }
+
+    if (content === '!invites' || content === '!invites check' || content === '/invites check' || content === '!invites-check') {
+      const target = message.mentions.users?.first() || message.author;
+      const data = this.db.get(`${message.guild.id}_${target.id}`) || { regular: 0, leaves: 0, fake: 0, bonus: 0 };
+      const bonus = data.bonus || 0;
+      const total = data.regular - data.leaves - data.fake + bonus;
+
+      const embed = new EmbedBuilder().setColor(0x10B981)
+        .setAuthor({ name: `${target.tag} • Invite Portfolio`, iconURL: target.displayAvatarURL() })
+        .setTitle('📨 Verified Invite Statistics')
+        .setDescription(
+          `**Total Real Invites:** \`${total} Invites\`\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `▸ 📥 **Regular Joined:** \`${data.regular}\`\n` +
+          `▸ 🚪 **Members Left:** \`${data.leaves}\`\n` +
+          `▸ ⚠️ **Fake / <24h Old:** \`${data.fake}\`\n` +
+          `▸ 🎁 **Staff Bonus:** \`${bonus}\`\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+        )
+        .setFooter({ text: `${message.guild.name} • (Regular - Leaves - Fake + Bonus)`, iconURL: message.guild.iconURL() })
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] }).catch(() => {});
+      return true;
+    }
+
+    return false;
+  }
+
   handleInviteCreate(invite) {
     if (!invite.guild) return;
     const codeMap = this.client.inviteCache.get(invite.guild.id) || new Map();

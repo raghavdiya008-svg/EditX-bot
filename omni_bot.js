@@ -281,8 +281,10 @@ client.on(Events.MessageCreate, async (message) => {
   // 5. AI Moderation Copilot: Scans suspicious content and reports to mods in report-only mode
   await aiModerator.checkMessage(message);
 
-  // 6. Bump Buddy: Inspects Disboard / Bump Buddy confirmations
+  // 6. Utility & Invites Plain-Text Commands & Bump Buddy
   utility.checkBump(message);
+  const handledUtil = await utility.checkMessage(message);
+  if (handledUtil) return;
 
   // 7. Tags, AFK, Auto-Responders & Persistent Sticky Message Reposting
   await tags.checkMessage(message);
