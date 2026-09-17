@@ -421,6 +421,56 @@ class BotMemoryModule {
           }
           return data;
         })(),
+        invites: (() => {
+          if (!this.db.invites) return null;
+          const data = {};
+          for (const [k, v] of this.db.invites.entries()) {
+            if (k.startsWith(`${guild.id}_`) || k.startsWith(`invitedBy_${guild.id}_`) || k.startsWith(`invite_rewards_${guild.id}`)) {
+              data[k] = v;
+            }
+          }
+          return data;
+        })(),
+        roles: (() => {
+          if (!this.db.roles) return null;
+          const data = {};
+          for (const [k, v] of this.db.roles.entries()) {
+            if (k.startsWith(guild.id) || k.includes(guild.id)) data[k] = v;
+          }
+          return data;
+        })(),
+        tags: (() => {
+          if (!this.db.tags) return null;
+          const data = {};
+          for (const [k, v] of this.db.tags.entries()) {
+            if (k.startsWith(`${guild.id}_`) || k.includes(guild.id)) data[k] = v;
+          }
+          return data;
+        })(),
+        cases: (() => {
+          if (!this.db.cases) return null;
+          const data = {};
+          for (const [k, v] of this.db.cases.entries()) {
+            if (k.startsWith(`${guild.id}_`) || k.includes(guild.id)) data[k] = v;
+          }
+          return data;
+        })(),
+        starboard: (() => {
+          if (!this.db.starboard) return null;
+          const data = {};
+          for (const [k, v] of this.db.starboard.entries()) {
+            if (k.startsWith(`${guild.id}_`) || k.includes(guild.id)) data[k] = v;
+          }
+          return data;
+        })(),
+        giveaways: (() => {
+          if (!this.db.giveaways) return null;
+          const data = {};
+          for (const [k, v] of this.db.giveaways.entries()) {
+            if (k.startsWith(`${guild.id}_`) || k.includes(guild.id)) data[k] = v;
+          }
+          return data;
+        })(),
         directives: this.utilDb.get(`directives_${guild.id}`) || this.guildDirectives.get(guild.id) || []
       };
 
@@ -435,10 +485,12 @@ class BotMemoryModule {
           `**State Snapshot Generated**\n` +
           `• Timestamp: <t:${Math.floor(Date.now() / 1000)}:F>\n` +
           `• Welcomer: ${stateSnapshot.utility.welcomer?.channelId ? `<#${stateSnapshot.utility.welcomer.channelId}>` : 'Default'}\n` +
+          `• Invites Tracked: \`${Object.keys(stateSnapshot.invites || {}).length}\` entries\n` +
           `• Muted Channels: \`${(stateSnapshot.utility.aichat_muted || []).length}\` channel(s)\n` +
           `• Server-Wide Mute: \`${stateSnapshot.utility.aichat_muted_server ? 'Active (Silent)' : 'Disabled'}\`\n` +
           `• Stats Channels: ${stateSnapshot.utility.stats_channels ? 'Configured' : 'None'}`
         )
+
       // Clean up previous snapshot messages so #bot-memory stays completely clean and uncluttered
       if (memChan.messages && typeof memChan.messages.fetch === 'function') {
         try {
@@ -600,6 +652,48 @@ class BotMemoryModule {
         if (xpCount > 0) restoredCount += xpCount;
       }
 
+      // Invites Tracker: Restore all member invite statistics and rewards
+      if (snapshot.invites && this.db.invites) {
+        let invCount = 0;
+        for (const [k, v] of Object.entries(snapshot.invites)) {
+          this.db.invites.set(k, v);
+          invCount++;
+        }
+        if (invCount > 0) restoredCount += invCount;
+      }
+
+      // Roles, Tags, Cases, Starboard & Giveaways Restore
+      if (snapshot.roles && this.db.roles) {
+        for (const [k, v] of Object.entries(snapshot.roles)) {
+          this.db.roles.set(k, v);
+          restoredCount++;
+        }
+      }
+      if (snapshot.tags && this.db.tags) {
+        for (const [k, v] of Object.entries(snapshot.tags)) {
+          this.db.tags.set(k, v);
+          restoredCount++;
+        }
+      }
+      if (snapshot.cases && this.db.cases) {
+        for (const [k, v] of Object.entries(snapshot.cases)) {
+          this.db.cases.set(k, v);
+          restoredCount++;
+        }
+      }
+      if (snapshot.starboard && this.db.starboard) {
+        for (const [k, v] of Object.entries(snapshot.starboard)) {
+          this.db.starboard.set(k, v);
+          restoredCount++;
+        }
+      }
+      if (snapshot.giveaways && this.db.giveaways) {
+        for (const [k, v] of Object.entries(snapshot.giveaways)) {
+          this.db.giveaways.set(k, v);
+          restoredCount++;
+        }
+      }
+
       // Directives & Rules: Restore custom live rules
       if (snapshot.directives && Array.isArray(snapshot.directives) && snapshot.directives.length > 0) {
         this.utilDb.set(`directives_${guild.id}`, snapshot.directives, true);
@@ -607,6 +701,7 @@ class BotMemoryModule {
         restoredCount += snapshot.directives.length;
       }
       // ────────────────────────────────────────────────────────────────────────────
+
 
       console.log(`[BOT MEMORY] Successfully restored ${restoredCount} database entries for ${guild.name} from #bot-memory!`);
       return { success: true, channelId: memChan.id, keysRestored: restoredCount };
