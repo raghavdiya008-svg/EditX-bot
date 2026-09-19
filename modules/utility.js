@@ -57,10 +57,6 @@ class UtilityModule {
       new SlashCommandBuilder().setName('serverstats').setDescription('Deploy auto-updating server stats counter channels')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator).setDMPermission(false),
 
-      new SlashCommandBuilder().setName('invite').setDescription('Quick check your or another member’s verified invite statistics')
-        .addUserOption(o => o.setName('target').setDescription('Target member to inspect'))
-        .setDMPermission(false),
-
       new SlashCommandBuilder().setName('invites').setDescription('Comprehensive server invite tracking and management')
         .addSubcommand(s => s.setName('check').setDescription('Check your or another member’s detailed invite statistics')
           .addUserOption(o => o.setName('target').setDescription('Target member')))

@@ -73,6 +73,11 @@ class DMReminderModule {
           s.setName('view')
             .setDescription('View current community rules stored in bot memory')
         )
+        .addSubcommand(s =>
+          s.setName('add')
+            .setDescription('Add a new custom rule or directive for EditX AI to strictly obey')
+            .addStringOption(o => o.setName('instruction').setDescription('The rule or directive for EditX AI to follow').setRequired(true))
+        )
     ];
   }
 
@@ -586,6 +591,22 @@ class DMReminderModule {
           .setTimestamp();
 
         await interaction.reply({ embeds: [viewEmbed], ephemeral: true });
+        return true;
+      }
+
+      if (sub === 'add') {
+        const instruction = options.getString('instruction');
+        if (this.client.botMemory && typeof this.client.botMemory.addDirective === 'function') {
+          await interaction.deferReply({ ephemeral: true });
+          const result = await this.client.botMemory.addDirective(guild, instruction, user);
+          if (result.success) {
+            await interaction.editReply(`🧠 **Directive Learned & Saved to Memory!**\n• **Rule:** "${instruction}"\n• **Rules Channel:** ${result.channelId ? `<#${result.channelId}>` : '`#bot-rules`'}\nI will strictly follow this instruction in all future responses.`);
+          } else {
+            await interaction.editReply(`❌ **Failed to save directive:** ${result.error}`);
+          }
+          return true;
+        }
+        await interaction.reply({ content: '❌ Bot Memory module is offline.', ephemeral: true });
         return true;
       }
 

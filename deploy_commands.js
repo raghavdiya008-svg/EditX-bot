@@ -27,6 +27,7 @@ const MusicModule = require('./modules/music');
 const BotMemoryModule = require('./modules/bot_memory');
 const TranslatorModule = require('./modules/translator');
 const HousekeeperModule = require('./modules/housekeeper');
+const DMReminderModule = require('./modules/dm_reminder');
 
 const TOKEN = process.env.DISCORD_TOKEN || process.env.DISCORD_BOT_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || '1538958753670500392';
@@ -51,7 +52,8 @@ const dummyDb = {
   tags: new JSONDatabase('tags'),
   verification: new JSONDatabase('verification'),
   social: new JSONDatabase('social'),
-  hiring: new JSONDatabase('hiring')
+  hiring: new JSONDatabase('hiring'),
+  dm: new JSONDatabase('dm')
 };
 
 const dummyClient = { on: () => {}, guilds: { cache: new Map() } };
@@ -76,7 +78,8 @@ const modules = [
   new MusicModule(dummyClient),
   new BotMemoryModule(dummyClient, dummyDb),
   new TranslatorModule(dummyClient, dummyDb),
-  new HousekeeperModule(dummyClient, dummyDb)
+  new HousekeeperModule(dummyClient, dummyDb),
+  new DMReminderModule(dummyClient, dummyDb)
 ];
 
 const allCommands = [];

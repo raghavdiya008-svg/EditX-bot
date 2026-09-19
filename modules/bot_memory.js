@@ -70,13 +70,6 @@ class BotMemoryModule {
         .setDMPermission(false),
 
       new SlashCommandBuilder()
-        .setName('rule')
-        .setDescription('Add a new custom rule/directive for the bot to strictly obey')
-        .addStringOption(o => o.setName('instruction').setDescription('The rule or directive for EditX AI to follow').setRequired(true))
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .setDMPermission(false),
-
-      new SlashCommandBuilder()
         .setName('scan')
         .setDescription('Deep-scan the entire server so EditX AI understands everything')
         .addSubcommand(s =>
