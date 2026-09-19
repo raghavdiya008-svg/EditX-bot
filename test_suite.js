@@ -2209,7 +2209,7 @@ async function runTests() {
     const subscribers = db.dm.get(`subscribers_${dmGuild.id}`);
     assert.ok(subscribers && subscribers['member_user_111'], 'Member must be registered in subscribers database');
     assert.strictEqual(adminDMs.length, 1, 'Admin must be notified in DM when new member subscribes');
-    assert.ok(adminDMs[0].embeds[0].data.title.includes('Marked READY'), 'Admin embed must notify about READY');
+    assert.ok(adminDMs[0].content.includes('READY'), 'Admin message must notify about READY');
 
     // 3. Test Member Inquires / Sends Message to Bot -> Relayed to Admin DM
     let reactEmojis = [];
@@ -2224,9 +2224,8 @@ async function runTests() {
     await dmMod.handleDirectMessage(questionMessage);
     assert.ok(reactEmojis.includes('📬'), 'Bot must acknowledge message with receipt reaction');
     assert.strictEqual(adminDMs.length, 2, 'Admin must receive relayed DM');
-    const relayedEmbed = adminDMs[1].embeds[0];
-    assert.ok(relayedEmbed.data.title.includes('Member Sent a Direct Message'), 'Relay embed title must match');
-    assert.ok(relayedEmbed.data.description.includes('masterclass'), 'Relay must contain member inquiry');
+    assert.ok(adminDMs[1].content.includes('<@member_user_111>'), 'Relay must mention member ID');
+    assert.ok(adminDMs[1].content.includes('masterclass'), 'Relay must contain member inquiry');
 
     // 4. Test 1-Click Admin Reply via Modal Button
     let shownModal = null;
@@ -2275,8 +2274,8 @@ async function runTests() {
     };
     await dmMod.handleDirectMessageReaction(mockReaction, memberUser);
     assert.strictEqual(adminDMs.length, 3, 'Admin must receive reaction alert in DM');
-    assert.ok(adminDMs[2].embeds[0].data.title.includes('Member Reacted in DMs'), 'Alert embed title must match');
-    assert.ok(adminDMs[2].embeds[0].data.description.includes('🔥'), 'Alert embed must identify emoji');
+    assert.ok(adminDMs[2].content.includes('<@member_user_111>'), 'Alert must identify member');
+    assert.ok(adminDMs[2].content.includes('🔥'), 'Alert must identify emoji');
 
     // 6. Test /dmblast send broadcast to all READY members
     let broadcastEditReply = null;

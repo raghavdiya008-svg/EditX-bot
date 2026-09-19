@@ -184,6 +184,7 @@ client.once(Events.ClientReady, async () => {
     await quickSetup.runAutoPilot(guild);
     await utility.handleGuildCreate(guild);
     await botMemory.initGuild(guild);
+    await dmReminder.initGuild(guild);
   }
   console.log(`[AUTOPILOT] 100% Autonomous server operations online for ${client.guilds.cache.size} guild(s).`);
 
@@ -211,6 +212,7 @@ client.on(Events.GuildCreate, async (guild) => {
   await quickSetup.runAutoPilot(guild);
   await utility.handleGuildCreate(guild);
   await botMemory.initGuild(guild);
+  await dmReminder.initGuild(guild);
 });
 
 // Member Lifecycle Events (Welcomer & Invite Tracking & Auto-Roles)

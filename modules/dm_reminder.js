@@ -102,12 +102,28 @@ class DMReminderModule {
   }
 
   /**
+   * Automatically initializes the reports channel on guild join/startup
+   */
+  async initGuild(guild) {
+    if (!guild) return;
+    try {
+      await this.getReportDestination(guild);
+    } catch (e) {
+      console.warn(`[DM REPORTS INIT NOTICE] ${guild.name}:`, e.message);
+    }
+  }
+
+  /**
    * Resolves where to deliver incoming member DMs, alerts and reactions:
    * 1. A dedicated server channel if configured via /dmblast channel set <#channel>
-   * 2. Or the administrator / owner personal DM
+   * 2. An existing server channel matching dm-reports/modmail
+   * 3. Automatically created private #📬・dm-reports channel (staff only)
+   * 4. Fallback to admin/owner personal DM only if channel cannot be created
    */
   async getReportDestination(guild) {
     if (!guild) return null;
+
+    // 1. Explicitly configured channel
     const configuredChanId = this.utilDb.get(`dm_report_channel_${guild.id}`);
     if (configuredChanId) {
       let ch = guild.channels?.cache?.get(configuredChanId);
@@ -119,6 +135,61 @@ class DMReminderModule {
       }
     }
 
+    // 2. Auto-discover existing reports channel in guild
+    if (guild.channels?.cache) {
+      const channels = Array.from(guild.channels.cache.values()).filter(Boolean);
+      const discovered = channels.find(c =>
+        c && c.type === ChannelType.GuildText && (
+          /^(?:📬・)?dm[-_]?reports?$/i.test(c.name) ||
+          /dm[-_]?reports?/i.test(c.name) ||
+          /member[-_]?dms?/i.test(c.name) ||
+          /mod[-_]?mail/i.test(c.name) ||
+          /staff[-_]?reports?/i.test(c.name)
+        )
+      );
+      if (discovered && typeof discovered.send === 'function') {
+        this.utilDb.set(`dm_report_channel_${guild.id}`, discovered.id);
+        return { type: 'channel', target: discovered, channel: discovered };
+      }
+    }
+
+    // 3. Auto-create private #📬・dm-reports channel
+    try {
+      if (guild.channels?.create) {
+        const permissionOverwrites = [
+          {
+            id: guild.id, // @everyone
+            deny: [PermissionFlagsBits.ViewChannel]
+          },
+          {
+            id: this.client.user.id,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
+          }
+        ];
+        if (guild.ownerId) {
+          permissionOverwrites.push({
+            id: guild.ownerId,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
+          });
+        }
+
+        const newChan = await guild.channels.create({
+          name: '📬・dm-reports',
+          type: ChannelType.GuildText,
+          topic: 'Private staff channel for incoming member DMs, questions, and 2-way replies.',
+          permissionOverwrites
+        });
+
+        if (newChan && typeof newChan.send === 'function') {
+          this.utilDb.set(`dm_report_channel_${guild.id}`, newChan.id);
+          return { type: 'channel', target: newChan, channel: newChan };
+        }
+      }
+    } catch (e) {
+      console.warn('[DM REPORTS AUTO-CREATE NOTICE]', e.message);
+    }
+
+    // 4. Fallback to admin user only if channel cannot be created
     const adminUser = await this.getAdminRecipient(guild);
     if (adminUser) {
       return { type: 'user', target: adminUser, user: adminUser };
@@ -132,9 +203,11 @@ class DMReminderModule {
    */
   getSharedGuilds(user) {
     if (!this.client?.guilds?.cache) return [];
-    return Array.from(this.client.guilds.cache.values()).filter(g =>
-      g.members?.cache?.has(user.id) || g.members?.resolve(user.id)
+    const allGuilds = Array.from(this.client.guilds.cache.values());
+    const matched = allGuilds.filter(g =>
+      g.members?.cache?.has(user.id) || g.members?.resolve?.(user.id)
     );
+    return matched.length > 0 ? matched : allGuilds;
   }
 
   /**
@@ -168,26 +241,14 @@ class DMReminderModule {
         this.db.set(key, subs);
         registeredGuildNames.push(g.name);
 
-        // Alert Destination (Channel or Admin DM)
+        // Alert Destination (Channel or Admin DM) in clean 2-line format
         try {
           const dest = await this.getReportDestination(g);
           if (dest && (dest.type === 'channel' || dest.target.id !== author.id)) {
-            const totalSubs = Object.values(subs).filter(s => s.active).length;
-            const adminAlertEmbed = new EmbedBuilder()
-              .setColor(0x10B981)
-              .setAuthor({ name: `${author.tag} is READY!`, iconURL: author.displayAvatarURL() })
-              .setTitle('🔔 New Member Marked READY for Reminders')
-              .setDescription(
-                `Member <@${author.id}> (**${author.tag}**) sent **READY** in DMs.\n` +
-                `They are now enrolled in your broadcast reminder list for **${g.name}**.\n\n` +
-                `• **User ID:** \`${author.id}\`\n` +
-                `• **Total READY Subscribers:** \`${totalSubs} members\`\n` +
-                `• **Action:** Use \`/dmblast send\` in your server to broadcast to them at once.`
-              )
-              .setFooter({ text: `${g.name} • DM Subscriber Ledger` })
-              .setTimestamp();
-
-            await dest.target.send({ embeds: [adminAlertEmbed] }).catch(() => {});
+            const sentReady = await dest.target.send({ content: `<@${author.id}>\nREADY` }).catch(() => {});
+            if (sentReady?.id) {
+              this.utilDb.set(`report_msg_${sentReady.id}`, author.id);
+            }
           }
         } catch (admErr) {
           console.warn('[DM REMINDER] Could not notify destination:', admErr.message);
@@ -262,44 +323,15 @@ class DMReminderModule {
         const attachmentUrls = Array.from(message.attachments?.values() || []).map(a => a.url);
         const attachmentText = attachmentUrls.length > 0 ? `\n📎 ${attachmentUrls.join(' ')}` : '';
 
-        if (dest.type === 'channel') {
-          // Clean 2-line format for reports channel:
-          // Line 1: Member mention
-          // Line 2: Message content
-          const reportContent = `<@${author.id}>\n${content || '[Attachment/Media]'}${attachmentText}`;
-          const sentMsg = await dest.target.send({ content: reportContent }).catch(err => {
-            console.warn('[DM RELAY] Failed to relay DM to channel:', err.message);
-          });
-          if (sentMsg && sentMsg.id) {
-            this.utilDb.set(`report_msg_${sentMsg.id}`, author.id);
-          }
-        } else {
-          // Fallback for personal Admin DMs:
-          const relayEmbed = new EmbedBuilder()
-            .setColor(0x5865F2)
-            .setAuthor({ name: `Incoming DM: ${author.tag}`, iconURL: author.displayAvatarURL() })
-            .setTitle('📨 Member Sent a Direct Message to the Bot')
-            .setDescription(
-              `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-              `👤 **Member:** <@${author.id}> • **${author.tag}** (\`${author.id}\`)\n` +
-              `🏠 **Shared Server:** **${primaryGuild.name}**\n\n` +
-              `💬 **Message Content:**\n> ${content ? content.split('\n').join('\n> ') : '*[No text content]*'}` +
-              `${attachmentText}\n` +
-              `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
-            )
-            .setFooter({ text: `Reply with the button below or '!reply ${author.id} <your message>'` })
-            .setTimestamp();
-
-          const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId(`dmreply_${author.id}`)
-              .setLabel(`✉️ Reply to ${author.username}`)
-              .setStyle(ButtonStyle.Primary)
-          );
-
-          await dest.target.send({ embeds: [relayEmbed], components: [row] }).catch(err => {
-            console.warn('[DM RELAY] Failed to relay DM:', err.message);
-          });
+        // Clean 2-line format for all destinations:
+        // Line 1: Member mention
+        // Line 2: Message content
+        const reportContent = `<@${author.id}>\n${content || '[Attachment/Media]'}${attachmentText}`;
+        const sentMsg = await dest.target.send({ content: reportContent }).catch(err => {
+          console.warn('[DM RELAY] Failed to relay DM:', err.message);
+        });
+        if (sentMsg && sentMsg.id) {
+          this.utilDb.set(`report_msg_${sentMsg.id}`, author.id);
         }
 
         // React with subtle receipt confirmation to member
@@ -325,18 +357,9 @@ class DMReminderModule {
       const emojiStr = reaction.emoji?.id ? `<:${reaction.emoji.name}:${reaction.emoji.id}>` : (reaction.emoji?.name || '✨');
       const msgSnippet = reaction.message?.content || (reaction.message?.embeds?.[0]?.title || reaction.message?.embeds?.[0]?.description || 'a reminder message');
 
-      const reactionEmbed = new EmbedBuilder()
-        .setColor(0xF59E0B)
-        .setTitle('✨ Member Reacted in DMs')
-        .setDescription(
-          `👤 **Member:** <@${user.id}> • **${user.tag || user.username}**\n` +
-          `🎭 **Reaction:** ${emojiStr}\n` +
-          `📄 **On Message:** *"${msgSnippet.slice(0, 150)}..."*`
-        )
-        .setFooter({ text: `${primaryGuild.name} • DM Reaction Monitor` })
-        .setTimestamp();
-
-      await dest.target.send({ embeds: [reactionEmbed] }).catch(() => {});
+      await dest.target.send({
+        content: `<@${user.id}>\nReacted with ${emojiStr} on "${msgSnippet.slice(0, 100)}"`
+      }).catch(() => {});
     } catch (e) {
       console.warn('[DM REACTION ERROR]', e.message);
     }
