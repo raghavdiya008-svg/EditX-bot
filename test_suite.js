@@ -2359,6 +2359,50 @@ async function runTests() {
     };
     await dmMod.handleCommand(mockRulesViewInteraction);
     assert.ok(rulesViewReply && rulesViewReply.embeds[0].data.title.includes('Active Community Rules'), 'Must show rules view embed');
+
+    // 10. Test /dmblast channel set: route member DMs to dedicated server channel instead of personal DM
+    let reportsChannelMessages = [];
+    const staffReportsChannel = {
+      id: 'chan_staff_reports_888',
+      name: 'dm-reports',
+      isTextBased: () => true,
+      send: async (payload) => {
+        reportsChannelMessages.push(payload);
+        return { id: `report_msg_${Date.now()}` };
+      }
+    };
+    dmGuild.channels.cache.set('chan_staff_reports_888', staffReportsChannel);
+
+    let channelSetReply = null;
+    const mockChannelSetInteraction = {
+      commandName: 'dmblast',
+      isButton: () => false,
+      isStringSelectMenu: () => false,
+      isModalSubmit: () => false,
+      isChatInputCommand: () => true,
+      guild: dmGuild,
+      user: adminUser,
+      options: {
+        getSubcommandGroup: () => 'channel',
+        getSubcommand: () => 'set',
+        getChannel: () => staffReportsChannel
+      },
+      reply: async (payload) => { channelSetReply = payload; }
+    };
+    await dmMod.handleCommand(mockChannelSetInteraction);
+    assert.ok(channelSetReply && channelSetReply.content.includes('DM Reports Channel Configured'), 'Must configure reports channel');
+
+    // 11. Member sends inquiry -> routed to dedicated channel, keeping Admin private DM clean
+    const memberNewInquiry = {
+      author: memberUser,
+      content: 'Can someone review my edit draft in the reports channel?',
+      attachments: new Map(),
+      guild: null,
+      react: async () => {}
+    };
+    await dmMod.handleDirectMessage(memberNewInquiry);
+    assert.strictEqual(reportsChannelMessages.length, 1, 'Member DM must be forwarded to dedicated reports channel');
+    assert.ok(reportsChannelMessages[0].embeds[0].data.description.includes('review my edit draft'), 'Report channel must receive member inquiry');
   });
 
   console.log('\n====================================================');

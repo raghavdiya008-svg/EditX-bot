@@ -57,6 +57,23 @@ class DMReminderModule {
           s.setName('admin')
             .setDescription('Set which staff member receives forwarded member DMs and reaction alerts')
             .addUserOption(o => o.setName('user').setDescription('Staff user to receive DM reports').setRequired(true))
+        )
+        .addSubcommandGroup(g =>
+          g.setName('channel')
+            .setDescription('Configure dedicated channel for member DM reports and reactions')
+            .addSubcommand(s =>
+              s.setName('set')
+                .setDescription('Route all incoming member DMs, questions & reactions to a private server channel')
+                .addChannelOption(o => o.setName('channel').setDescription('Private staff channel').addChannelTypes(ChannelType.GuildText).setRequired(true))
+            )
+            .addSubcommand(s =>
+              s.setName('view')
+                .setDescription('View where member DM reports are currently being sent')
+            )
+            .addSubcommand(s =>
+              s.setName('reset')
+                .setDescription('Reset reports back to Owner personal DM')
+            )
         ),
 
       new SlashCommandBuilder()
@@ -95,6 +112,32 @@ class DMReminderModule {
     if (guild.ownerId) {
       const owner = await this.client.users.fetch(guild.ownerId).catch(() => null);
       if (owner) return owner;
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolves where to deliver incoming member DMs, alerts and reactions:
+   * 1. A dedicated server channel if configured via /dmblast channel set <#channel>
+   * 2. Or the administrator / owner personal DM
+   */
+  async getReportDestination(guild) {
+    if (!guild) return null;
+    const configuredChanId = this.utilDb.get(`dm_report_channel_${guild.id}`);
+    if (configuredChanId) {
+      let ch = guild.channels?.cache?.get(configuredChanId);
+      if (!ch && guild.channels?.fetch) {
+        ch = await guild.channels.fetch(configuredChanId).catch(() => null);
+      }
+      if (ch && typeof ch.send === 'function') {
+        return { type: 'channel', target: ch, channel: ch };
+      }
+    }
+
+    const adminUser = await this.getAdminRecipient(guild);
+    if (adminUser) {
+      return { type: 'user', target: adminUser, user: adminUser };
     }
 
     return null;
@@ -141,10 +184,10 @@ class DMReminderModule {
         this.db.set(key, subs);
         registeredGuildNames.push(g.name);
 
-        // Alert Admin DM
+        // Alert Destination (Channel or Admin DM)
         try {
-          const adminUser = await this.getAdminRecipient(g);
-          if (adminUser && adminUser.id !== author.id) {
+          const dest = await this.getReportDestination(g);
+          if (dest && (dest.type === 'channel' || dest.target.id !== author.id)) {
             const totalSubs = Object.values(subs).filter(s => s.active).length;
             const adminAlertEmbed = new EmbedBuilder()
               .setColor(0x10B981)
@@ -160,10 +203,10 @@ class DMReminderModule {
               .setFooter({ text: `${g.name} • DM Subscriber Ledger` })
               .setTimestamp();
 
-            await adminUser.send({ embeds: [adminAlertEmbed] }).catch(() => {});
+            await dest.target.send({ embeds: [adminAlertEmbed] }).catch(() => {});
           }
         } catch (admErr) {
-          console.warn('[DM REMINDER] Could not notify admin:', admErr.message);
+          console.warn('[DM REMINDER] Could not notify destination:', admErr.message);
         }
       }
 
@@ -183,13 +226,14 @@ class DMReminderModule {
       return;
     }
 
-    // 2. OPT-OUT KEYWORD: "STOP" / "UNSUBSCRIBE"
+    // 2. OPT-OUT KEYWORD: "STOP" or "UNSUBSCRIBE"
     if (upper === 'STOP' || upper === 'UNSUBSCRIBE' || upper === 'CANCEL') {
       for (const g of (sharedGuilds.length > 0 ? sharedGuilds : (primaryGuild ? [primaryGuild] : []))) {
         const key = `subscribers_${g.id}`;
         const subs = this.db.get(key) || {};
         if (subs[author.id]) {
           subs[author.id].active = false;
+          subs[author.id].unsubscribedAt = Date.now();
           this.db.set(key, subs);
         }
       }
@@ -199,12 +243,12 @@ class DMReminderModule {
       }).catch(() => {});
     }
 
-    // 3. TWO-WAY DM RELAY: Forward Member Message to Admin DM
+    // 3. TWO-WAY DM RELAY: Forward Member Message to Admin DM or Reports Channel
     if (primaryGuild) {
-      const adminUser = await this.getAdminRecipient(primaryGuild);
-      if (adminUser) {
+      const dest = await this.getReportDestination(primaryGuild);
+      if (dest) {
         // If the message is from the admin themselves, check for !reply prefix
-        if (adminUser.id === author.id) {
+        if (dest.type === 'user' && dest.target.id === author.id) {
           if (content.startsWith('!reply ') || content.startsWith('/reply ')) {
             const parts = content.split(' ');
             const targetId = parts[1]?.replace(/[<@!>]/g, '');
@@ -230,7 +274,7 @@ class DMReminderModule {
           return; // Don't relay admin's own miscellaneous DMs back to themselves
         }
 
-        // Format relay report for Admin DM
+        // Format relay report for Destination
         const attachmentUrls = Array.from(message.attachments?.values() || []).map(a => a.url);
         const attachmentText = attachmentUrls.length > 0 ? `\n📎 **Attachments (${attachmentUrls.length}):**\n${attachmentUrls.join('\n')}` : '';
 
@@ -256,8 +300,8 @@ class DMReminderModule {
             .setStyle(ButtonStyle.Primary)
         );
 
-        await adminUser.send({ embeds: [relayEmbed], components: [row] }).catch(err => {
-          console.warn('[DM RELAY] Failed to relay DM to admin:', err.message);
+        await dest.target.send({ embeds: [relayEmbed], components: [row] }).catch(err => {
+          console.warn('[DM RELAY] Failed to relay DM:', err.message);
         });
 
         // React with subtle receipt confirmation to member
@@ -267,7 +311,7 @@ class DMReminderModule {
   }
 
   /**
-   * Catches emoji reactions in DMs and reports them to Admin DM
+   * Catches emoji reactions in DMs and reports them to Admin DM or Reports Channel
    */
   async handleDirectMessageReaction(reaction, user) {
     if (!reaction || user.bot) return;
@@ -277,8 +321,8 @@ class DMReminderModule {
       const primaryGuild = sharedGuilds[0] || (this.client.guilds?.cache ? Array.from(this.client.guilds.cache.values())[0] : null);
       if (!primaryGuild) return;
 
-      const adminUser = await this.getAdminRecipient(primaryGuild);
-      if (!adminUser || adminUser.id === user.id) return;
+      const dest = await this.getReportDestination(primaryGuild);
+      if (!dest || (dest.type === 'user' && dest.target.id === user.id)) return;
 
       const emojiStr = reaction.emoji?.id ? `<:${reaction.emoji.name}:${reaction.emoji.id}>` : (reaction.emoji?.name || '✨');
       const msgSnippet = reaction.message?.content || (reaction.message?.embeds?.[0]?.title || reaction.message?.embeds?.[0]?.description || 'a reminder message');
@@ -294,7 +338,7 @@ class DMReminderModule {
         .setFooter({ text: `${primaryGuild.name} • DM Reaction Monitor` })
         .setTimestamp();
 
-      await adminUser.send({ embeds: [reactionEmbed] }).catch(() => {});
+      await dest.target.send({ embeds: [reactionEmbed] }).catch(() => {});
     } catch (e) {
       console.warn('[DM REACTION ERROR]', e.message);
     }
@@ -375,15 +419,15 @@ class DMReminderModule {
       const primaryGuild = sharedGuilds[0] || (this.client.guilds?.cache ? Array.from(this.client.guilds.cache.values())[0] : null);
 
       if (primaryGuild) {
-        const adminUser = await this.getAdminRecipient(primaryGuild);
-        if (adminUser) {
+        const dest = await this.getReportDestination(primaryGuild);
+        if (dest) {
           const ackEmbed = new EmbedBuilder()
             .setColor(0x10B981)
             .setTitle('✅ Reminder Acknowledged')
             .setDescription(`👤 <@${user.id}> (**${user.tag || user.username}**) clicked Acknowledge on reminder broadcast \`#${broadcastId}\`.`)
             .setTimestamp();
 
-          await adminUser.send({ embeds: [ackEmbed] }).catch(() => {});
+          await dest.target.send({ embeds: [ackEmbed] }).catch(() => {});
         }
       }
       return true;
@@ -484,6 +528,46 @@ class DMReminderModule {
           ephemeral: true
         });
         return true;
+      }
+
+      // /dmblast channel [set|view|reset]
+      const subGroup = typeof options.getSubcommandGroup === 'function' ? options.getSubcommandGroup(false) : null;
+      if (subGroup === 'channel') {
+        if (sub === 'set') {
+          const targetChan = options.getChannel('channel');
+          this.utilDb.set(`dm_report_channel_${guild.id}`, targetChan.id);
+          await interaction.reply({
+            content: `✅ **DM Reports Channel Configured!**\nAll incoming member DMs, questions, file attachments, and reaction alerts will now be forwarded directly to <#${targetChan.id}>.\n*(Your private DM with the bot remains clean for personal commands & AI chat).*`,
+            ephemeral: true
+          });
+          return true;
+        }
+
+        if (sub === 'view') {
+          const chanId = this.utilDb.get(`dm_report_channel_${guild.id}`);
+          if (chanId) {
+            await interaction.reply({
+              content: `📍 **Current Destination:** Incoming member DMs and reaction alerts are routed to <#${chanId}>.`,
+              ephemeral: true
+            });
+          } else {
+            const adminId = this.utilDb.get(`dm_admin_recipient_${guild.id}`) || guild.ownerId;
+            await interaction.reply({
+              content: `📍 **Current Destination:** Incoming member DMs are delivered to <@${adminId}>'s personal DM.`,
+              ephemeral: true
+            });
+          }
+          return true;
+        }
+
+        if (sub === 'reset') {
+          this.utilDb.delete(`dm_report_channel_${guild.id}`);
+          await interaction.reply({
+            content: `🔄 **Reset Complete!** Reports will now be delivered to the server owner/admin personal DM.`,
+            ephemeral: true
+          });
+          return true;
+        }
       }
 
       // /dmblast reply
