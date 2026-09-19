@@ -47,6 +47,13 @@ An enterprise-grade, all-in-one Discord management, moderation, and community en
 - Automated 2-hour reminder interval for Disboard & Bump Buddy.
 - Live voice-channel counters for server members and boost tiers.
 
+### 8. 🔔 DM Reminder, Broadcast & Relay Center (`modules/dm_reminder.js`)
+- **READY Keyword Opt-In**: Members DM `READY` to the bot to subscribe to private announcements and reminders.
+- **Mass DM Broadcast (`/dmblast send`)**: Staff can dispatch formatted announcements with interactive acknowledgment buttons to all READY subscribers at once.
+- **Two-Way Member Relay**: Member DMs sent to the bot (inquiries, questions, attachments) are instantly forwarded to staff DMs with a 1-click modal reply button (`[ ✉️ Reply to Member ]`).
+- **DM Reaction Tracking**: Members can react to reminder DMs with emojis, and staff receives instant alerts in their DM with full context.
+- **Rules Synchronizer (`/rules update`)**: Auto-discovers `#rules`, builds official luxury community rules, updates database records, and synchronizes with AI Memory directives.
+
 ---
 
 ## 🛠️ Installation & Setup
