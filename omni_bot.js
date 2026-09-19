@@ -52,6 +52,7 @@ const SocialAlertsModule = require('./modules/social_alerts');
 const AIChatModule = require('./modules/ai_chat');
 const MusicModule = require('./modules/music');
 const BotMemoryModule = require('./modules/bot_memory');
+const DMReminderModule = require('./modules/dm_reminder');
 
 // Persistent Database Collections
 const db = {
@@ -68,7 +69,8 @@ const db = {
   tags: new JSONDatabase('tags'),
   verification: new JSONDatabase('verification'),
   social: new JSONDatabase('social'),
-  hiring: new JSONDatabase('hiring')
+  hiring: new JSONDatabase('hiring'),
+  dm: new JSONDatabase('dm')
 };
 
 const TOKEN = process.env.DISCORD_TOKEN || process.env.DISCORD_BOT_TOKEN;
@@ -89,7 +91,9 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildInvites,
     GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMessageReactions
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.DirectMessageReactions
   ],
   partials: [Partials.Message, Partials.Channel, Partials.GuildMember, Partials.Reaction, Partials.User],
   sweepers: { messages: { interval: 1800, lifetime: 900 } }
@@ -122,7 +126,7 @@ const socialAlerts = new SocialAlertsModule(client, db);
 const aiChat = new AIChatModule(client, db, botMemory);
 aiChat.setHousekeeper(housekeeper);
 const music = new MusicModule(client);
-
+const dmReminder = new DMReminderModule(client, db);
 
 // All active modules list
 const modules = [
@@ -146,7 +150,8 @@ const modules = [
   verification,
   socialAlerts,
   aiChat,
-  music
+  music,
+  dmReminder
 ];
 
 client.once(Events.ClientReady, async () => {
@@ -243,7 +248,10 @@ client.on(Events.MessageDelete, async (message) => {
 
 // Essential Event Routing: Honeypot, Autonomous Sentinel, Staff Copilot, Bump Buddy, Showcase Auto-Threads, Sticky Tags, Hiring Guard & Auto Translator
 client.on(Events.MessageCreate, async (message) => {
-  if (!message.guild) return;
+  if (!message.guild) {
+    await dmReminder.handleDirectMessage(message);
+    return;
+  }
 
   // Real-time custom directives ingestion in #bot-rules
   await botMemory.handleRulesChannelEvent(message, 'create');
@@ -310,7 +318,15 @@ client.on(Events.MessageDelete, async (message) => {
 // Unified Interaction Router (Commands, Buttons, Menus, Modals)
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.guild) {
-    if (interaction.isRepliable()) {
+    if (interaction.isButton() || interaction.isModalSubmit() || interaction.isStringSelectMenu()) {
+      try {
+        const handled = await dmReminder.handleInteraction(interaction);
+        if (handled) return;
+      } catch (err) {
+        console.error('[DM INTERACTION ERROR]', err);
+      }
+    }
+    if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
       return interaction.reply({ content: '❌ Commands are only supported within server channels.', ephemeral: true }).catch(() => {});
     }
     return;
@@ -356,8 +372,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// Reaction Event Handlers (Honeypot + Starboard)
+// Reaction Event Handlers (Honeypot + Starboard + DM Reactions)
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
+  if (!reaction.message?.guild) {
+    await dmReminder.handleDirectMessageReaction(reaction, user);
+    return;
+  }
   moderation.checkHoneypotReaction(reaction, user);
   for (const mod of modules) {
     if (typeof mod.handleReactionAdd === 'function') {

@@ -30,6 +30,7 @@ const HousekeeperModule = require('./modules/housekeeper');
 const TranslatorModule = require('./modules/translator');
 const AIChatModule = require('./modules/ai_chat');
 const BotMemoryModule = require('./modules/bot_memory');
+const DMReminderModule = require('./modules/dm_reminder');
 
 async function runTests() {
   console.log('====================================================');
@@ -66,7 +67,8 @@ async function runTests() {
     tags: new JSONDatabase('test_tags'),
     verification: new JSONDatabase('test_verification'),
     social: new JSONDatabase('test_social'),
-    hiring: new JSONDatabase('test_hiring')
+    hiring: new JSONDatabase('test_hiring'),
+    dm: new JSONDatabase('test_dm')
   };
 
   // Mock Discord Client & Guild
@@ -2102,6 +2104,261 @@ async function runTests() {
     };
     const hiringFaqReply = aiMod.checkCommunityFAQ(faqHiringMsg, faqHiringMsg.content.toLowerCase());
     assert.ok(hiringFaqReply && hiringFaqReply.includes('/post hiring'), 'Must explain /post hiring');
+  });
+
+  await test('DM Reminder & Broadcast System: READY opt-in, Admin DM relay, emoji reactions, /dmblast & /rules', async () => {
+    let adminDMs = [];
+    let memberDMs = [];
+    let rulesPosts = [];
+
+    const adminUser = {
+      id: 'admin_owner_999',
+      username: 'ServerOwner',
+      tag: 'ServerOwner#0001',
+      bot: false,
+      displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png',
+      send: async (payload) => {
+        adminDMs.push(payload);
+        return { id: `dm_admin_${Date.now()}` };
+      }
+    };
+
+    const memberUser = {
+      id: 'member_user_111',
+      username: 'CreativeEditor',
+      tag: 'CreativeEditor#1234',
+      bot: false,
+      displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/1.png',
+      send: async (payload) => {
+        memberDMs.push(payload);
+        return { id: `dm_member_${Date.now()}` };
+      }
+    };
+
+    const mockUsers = new Map([
+      ['admin_owner_999', adminUser],
+      ['member_user_111', memberUser]
+    ]);
+
+    const rulesChannel = {
+      id: 'rules_chan_101',
+      name: 'rules',
+      type: ChannelType.GuildText,
+      send: async (payload) => {
+        rulesPosts.push(payload);
+        return { id: `msg_rules_${Date.now()}` };
+      }
+    };
+
+    const dmGuild = {
+      id: 'guild_dm_test',
+      name: 'EditX Community',
+      ownerId: 'admin_owner_999',
+      iconURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png',
+      channels: {
+        cache: new Map([['rules_chan_101', rulesChannel]]),
+        fetch: async () => dmGuild.channels.cache
+      },
+      members: {
+        cache: new Map([
+          ['admin_owner_999', { user: adminUser, id: 'admin_owner_999' }],
+          ['member_user_111', { user: memberUser, id: 'member_user_111' }]
+        ]),
+        resolve: (id) => (id === 'admin_owner_999' ? { user: adminUser } : (id === 'member_user_111' ? { user: memberUser } : null))
+      }
+    };
+
+    let syncedDirectives = false;
+    const mockClient = {
+      user: { id: 'bot_omni_id', tag: 'EditX Bot#0000' },
+      guilds: {
+        cache: new Map([['guild_dm_test', dmGuild]])
+      },
+      users: {
+        cache: mockUsers,
+        fetch: async (id) => mockUsers.get(id) || null
+      },
+      botMemory: {
+        syncDirectives: async (guild) => { syncedDirectives = true; }
+      }
+    };
+
+    const dmMod = new DMReminderModule(mockClient, db);
+
+    // 1. Verify getCommands registration
+    const cmds = dmMod.getCommands();
+    assert.strictEqual(cmds.length, 2, 'Must export /dmblast and /rules slash commands');
+    assert.strictEqual(cmds[0].name, 'dmblast');
+    assert.strictEqual(cmds[1].name, 'rules');
+
+    // 2. Test Member Opt-in with "READY"
+    let readyReplies = [];
+    const readyMessage = {
+      author: memberUser,
+      content: 'READY',
+      guild: null,
+      reply: async (payload) => { readyReplies.push(payload); return readyMessage; }
+    };
+
+    await dmMod.handleDirectMessage(readyMessage);
+    assert.strictEqual(readyReplies.length, 1, 'Bot must reply to user on READY');
+    assert.ok(readyReplies[0].embeds[0].data.title.includes('READY'), 'Reply must confirm subscription');
+
+    const subscribers = db.dm.get(`subscribers_${dmGuild.id}`);
+    assert.ok(subscribers && subscribers['member_user_111'], 'Member must be registered in subscribers database');
+    assert.strictEqual(adminDMs.length, 1, 'Admin must be notified in DM when new member subscribes');
+    assert.ok(adminDMs[0].embeds[0].data.title.includes('Marked READY'), 'Admin embed must notify about READY');
+
+    // 3. Test Member Inquires / Sends Message to Bot -> Relayed to Admin DM
+    let reactEmojis = [];
+    const questionMessage = {
+      author: memberUser,
+      content: 'Can you tell me what software requirements are needed for the masterclass?',
+      attachments: new Map(),
+      guild: null,
+      react: async (emoji) => { reactEmojis.push(emoji); }
+    };
+
+    await dmMod.handleDirectMessage(questionMessage);
+    assert.ok(reactEmojis.includes('📬'), 'Bot must acknowledge message with receipt reaction');
+    assert.strictEqual(adminDMs.length, 2, 'Admin must receive relayed DM');
+    const relayedEmbed = adminDMs[1].embeds[0];
+    assert.ok(relayedEmbed.data.title.includes('Member Sent a Direct Message'), 'Relay embed title must match');
+    assert.ok(relayedEmbed.data.description.includes('masterclass'), 'Relay must contain member inquiry');
+
+    // 4. Test 1-Click Admin Reply via Modal Button
+    let shownModal = null;
+    const mockReplyBtnInteraction = {
+      isButton: () => true,
+      isStringSelectMenu: () => false,
+      isModalSubmit: () => false,
+      isChatInputCommand: () => false,
+      customId: 'dmreply_member_user_111',
+      showModal: async (m) => { shownModal = m; }
+    };
+
+    const handledBtn = await dmMod.handleInteraction(mockReplyBtnInteraction);
+    assert.strictEqual(handledBtn, true, 'Module must handle dmreply_ button');
+    assert.ok(shownModal, 'Must pop up modal for staff reply');
+    assert.strictEqual(shownModal.data.custom_id, 'dmreply_modal_member_user_111');
+
+    // Admin submits modal response
+    let modalReplyMessage = null;
+    const mockModalSubmitInteraction = {
+      isButton: () => false,
+      isStringSelectMenu: () => false,
+      isModalSubmit: () => true,
+      isChatInputCommand: () => false,
+      customId: 'dmreply_modal_member_user_111',
+      guild: null,
+      fields: {
+        getTextInputValue: (field) => 'All you need is After Effects 2024 and Premiere Pro!'
+      },
+      reply: async (payload) => { modalReplyMessage = payload; }
+    };
+
+    const handledModal = await dmMod.handleInteraction(mockModalSubmitInteraction);
+    assert.strictEqual(handledModal, true, 'Module must handle dmreply_modal_ submission');
+    assert.strictEqual(memberDMs.length, 1, 'Response must be delivered to member DM');
+    assert.ok(memberDMs[0].embeds[0].data.description.includes('After Effects 2024'), 'Member DM must contain staff reply');
+    assert.ok(modalReplyMessage.content.includes('Delivered response'), 'Staff receives confirmation');
+
+    // 5. Test DM Emoji Reaction Tracking -> Alerts Admin DM
+    const mockReaction = {
+      emoji: { name: '🔥', id: null },
+      message: {
+        content: 'Reminder: Masterclass starts tonight at 8PM!',
+        embeds: []
+      }
+    };
+    await dmMod.handleDirectMessageReaction(mockReaction, memberUser);
+    assert.strictEqual(adminDMs.length, 3, 'Admin must receive reaction alert in DM');
+    assert.ok(adminDMs[2].embeds[0].data.title.includes('Member Reacted in DMs'), 'Alert embed title must match');
+    assert.ok(adminDMs[2].embeds[0].data.description.includes('🔥'), 'Alert embed must identify emoji');
+
+    // 6. Test /dmblast send broadcast to all READY members
+    let broadcastEditReply = null;
+    const mockBlastInteraction = {
+      commandName: 'dmblast',
+      isButton: () => false,
+      isStringSelectMenu: () => false,
+      isModalSubmit: () => false,
+      isChatInputCommand: () => true,
+      guild: dmGuild,
+      user: adminUser,
+      options: {
+        getSubcommand: () => 'send',
+        getString: (opt) => {
+          if (opt === 'message') return '🚀 Special Announcement: New editing assets dropped!';
+          if (opt === 'button_label') return 'Got It!';
+          return null;
+        }
+      },
+      deferReply: async () => {},
+      editReply: async (payload) => { broadcastEditReply = payload; }
+    };
+
+    await dmMod.handleCommand(mockBlastInteraction);
+    assert.ok(broadcastEditReply && broadcastEditReply.content.includes('Delivered: **1 member(s)**'), 'Must broadcast to subscriber');
+    assert.strictEqual(memberDMs.length, 2, 'Member must receive broadcast announcement in DM');
+    assert.ok(memberDMs[1].embeds[0].data.description.includes('Special Announcement'), 'Member DM must match broadcast text');
+
+    // 7. Test Member Acknowledgment Button Click
+    let ackUpdate = null;
+    const mockAckInteraction = {
+      isButton: () => true,
+      isStringSelectMenu: () => false,
+      isModalSubmit: () => false,
+      isChatInputCommand: () => false,
+      customId: `ack_dm_${Date.now()}`,
+      user: memberUser,
+      update: async (payload) => { ackUpdate = payload; }
+    };
+    const handledAck = await dmMod.handleInteraction(mockAckInteraction);
+    assert.strictEqual(handledAck, true, 'Module must handle ack_dm_ button click');
+    assert.ok(ackUpdate && ackUpdate.components && ackUpdate.components.length > 0, 'Ack button must provide updated disabled button component');
+
+    // 8. Test /rules update: publishes luxury rules embed and syncs with directives
+    let rulesEditReply = null;
+    const mockRulesInteraction = {
+      commandName: 'rules',
+      isButton: () => false,
+      isStringSelectMenu: () => false,
+      isModalSubmit: () => false,
+      isChatInputCommand: () => true,
+      guild: dmGuild,
+      user: adminUser,
+      options: {
+        getSubcommand: () => 'update',
+        getChannel: () => null
+      },
+      deferReply: async () => {},
+      editReply: async (payload) => { rulesEditReply = payload; }
+    };
+
+    await dmMod.handleCommand(mockRulesInteraction);
+    assert.strictEqual(rulesPosts.length, 1, 'Must post rules embed to #rules channel');
+    assert.ok(rulesPosts[0].embeds[0].data.title.includes('Community Rules'), 'Must format official rules embed');
+    assert.strictEqual(syncedDirectives, true, 'Must sync directives with bot memory');
+    assert.ok(rulesEditReply.content.includes('Successfully Published'), 'Must confirm rules published to staff');
+
+    // 9. Test /rules view
+    let rulesViewReply = null;
+    const mockRulesViewInteraction = {
+      commandName: 'rules',
+      isButton: () => false,
+      isStringSelectMenu: () => false,
+      isModalSubmit: () => false,
+      isChatInputCommand: () => true,
+      guild: dmGuild,
+      user: adminUser,
+      options: {
+        getSubcommand: () => 'view'
+      },
+      reply: async (payload) => { rulesViewReply = payload; }
+    };
+    await dmMod.handleCommand(mockRulesViewInteraction);
+    assert.ok(rulesViewReply && rulesViewReply.embeds[0].data.title.includes('Active Community Rules'), 'Must show rules view embed');
   });
 
   console.log('\n====================================================');
