@@ -17,12 +17,13 @@ const {
 const { GoogleGenAI } = require('@google/genai');
 
 class HousekeeperModule {
-  constructor(client, db, sentinel) {
+  constructor(client, db, aiModerator = null) {
     this.client = client;
     this.db = db.utility;
     this.casesDb = db.cases;
     this.invitesDb = db.invites;
-    this.sentinel = sentinel;
+    this.aiModerator = aiModerator;
+    this.sentinel = aiModerator;
 
     const geminiKey = process.env.GEMINI_API_KEY;
     const groqKey = process.env.GROQ_API_KEY;
@@ -222,7 +223,11 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
   }
 
   async generateBriefingEmbed(guild) {
-    const incidents = this.sentinel ? this.sentinel.getRecentIncidents(5) : [];
+    const incidents = (this.aiModerator && typeof this.aiModerator.getRecentIncidents === 'function')
+      ? this.aiModerator.getRecentIncidents(5)
+      : (this.sentinel && typeof this.sentinel.getRecentIncidents === 'function')
+        ? this.sentinel.getRecentIncidents(5)
+        : [];
     const totalMembers = guild.memberCount || 1;
 
     let incidentSummary = '✅ **Zero critical security incidents.** Server operated quietly.';

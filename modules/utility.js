@@ -176,7 +176,7 @@ class UtilityModule {
           { label: 'Leveling & XP', value: 'help_leveling', emoji: '📈', description: 'Rank cards, voice/chat XP progression, leaderboard' },
           { label: 'Starboard, Tags & Sticky', value: 'help_tags', emoji: '📌', description: 'Sticky messages, Carl-bot TagScript, autoresponders, starboard' },
           { label: 'Server Utilities', value: 'help_utility', emoji: '🛠️', description: 'Polls, suggestions, reminders, server stats, info tools' },
-          { label: 'Music, Giveaways & Alerts', value: 'help_extra', emoji: '🎵', description: 'Voice streaming, giveaway system, YouTube/Twitch alerts' }
+          { label: 'Giveaways & Social Alerts', value: 'help_extra', emoji: '🎉', description: 'Interactive giveaways and automated YouTube/RSS alerts' }
         ])
     );
   }
@@ -266,15 +266,14 @@ class UtilityModule {
         .setFooter({ text: 'Omni Tools Suite • Analytics & Engagement' });
     } else if (category === 'help_extra') {
       embed.setColor(0xEC4899)
-        .setAuthor({ name: 'Omni Media • Audio, Giveaways & Socials', iconURL: botAvatar })
-        .setTitle('🎵 Music Streaming, Giveaways & Social Alerts')
-        .setDescription('Voice channel audio streaming, giveaways, and automated social notifications.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        .setAuthor({ name: 'Omni Media • Giveaways & Socials', iconURL: botAvatar })
+        .setTitle('🎉 Giveaways & Automated Social Alerts')
+        .setDescription('Interactive giveaway management and automated social notifications.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
         .addFields(
-          { name: '🎧 Voice Channel Music Streaming', value: '▸ `/play <query>` • Stream YouTube, SoundCloud, or Spotify audio\n▸ `/skip`, `/pause`, `/resume`, `/stop`, `/queue`' },
           { name: '🎉 Interactive Giveaways', value: '▸ `/giveaway start <duration> <winners> <prize>` • Host interactive giveaway\n▸ `/giveaway reroll`, `/giveaway end`' },
           { name: '🔔 Automated Social Alerts', value: '▸ `/alert youtube` • New video upload notifications\n▸ `/alert twitch` • Streamer live alerts\n▸ `/alert reddit` • Subreddit post notifications\n▸ `/alert rss` • RSS feed updates' }
         )
-        .setFooter({ text: 'Omni Media Engine • Voice & Social Integration' });
+        .setFooter({ text: 'Omni Media Engine • Social & Community Automation' });
     }
 
     return embed;
@@ -1177,11 +1176,29 @@ class UtilityModule {
 
   async updateServerStats() {
     for (const guild of this.client.guilds.cache.values()) {
+      // 1. Standard server stats
       const stats = this.utilDb.get(`stats_${guild.id}`);
       if (stats && stats.channelId) {
         const chan = guild.channels.cache.get(stats.channelId);
         if (chan) {
           chan.setName(`Members: ${guild.memberCount.toLocaleString()}`).catch(() => {});
+        }
+      }
+
+      // 2. Aesthetic decorate stats
+      const decorStats = this.utilDb.get(`stats_channels_${guild.id}`);
+      if (decorStats) {
+        if (decorStats.memberChannelId) {
+          const mChan = guild.channels.cache.get(decorStats.memberChannelId);
+          if (mChan) {
+            mChan.setName(`👥・Members: ${guild.memberCount.toLocaleString()}`).catch(() => {});
+          }
+        }
+        if (decorStats.boostChannelId) {
+          const bChan = guild.channels.cache.get(decorStats.boostChannelId);
+          if (bChan) {
+            bChan.setName(`🚀・Boost Level: ${guild.premiumTier || 0} (${guild.premiumSubscriptionCount || 0})`).catch(() => {});
+          }
         }
       }
     }

@@ -46,6 +46,11 @@ class AIModerationModule {
       rateLimitsAvoided: 0
     };
 
+    // Sliding-window context buffer & incident journal
+    this.channelContextBuffers = new Map();
+    this.maxBufferSize = 12;
+    this.incidentJournal = [];
+
     // Clean caches every 10 minutes
     setInterval(() => this.cleanCaches(), 10 * 60 * 1000);
 
@@ -75,6 +80,87 @@ class AIModerationModule {
         this.userCooldowns.delete(userId);
       }
     }
+    this.incidentJournal = this.incidentJournal.filter(i => now - i.timestamp < 24 * 60 * 60 * 1000);
+  }
+
+  trackMessageContext(message) {
+    if (!message.guild || !message.channel || message.author.bot) return;
+
+    const chanId = message.channel.id;
+    if (!this.channelContextBuffers.has(chanId)) {
+      this.channelContextBuffers.set(chanId, []);
+    }
+
+    const buffer = this.channelContextBuffers.get(chanId);
+    buffer.push({
+      id: message.id,
+      author: message.author.username,
+      authorId: message.author.id,
+      content: message.cleanContent || message.content,
+      timestamp: Date.now()
+    });
+
+    if (buffer.length > this.maxBufferSize) {
+      buffer.shift();
+    }
+  }
+
+  detectPhishingDomain(text) {
+    if (!text) return null;
+    const lower = text.toLowerCase();
+
+    const spoofPatterns = [
+      /d[li1]sc[o0]r[dcl][a-z0-9-]*\.(gift|gg|com|app|net|ru|xyz|top|link|org|co|info|site)/i,
+      /discrod[a-z0-9-]*\.[a-z0-9]+/i,
+      /discorcl[a-z0-9-]*\.[a-z0-9]+/i,
+      /discocrd[a-z0-9-]*\.[a-z0-9]+/i,
+      /steamcommuni[a-z0-9-]*\.[a-z0-9]+/i,
+      /steamcommsnitty\.[a-z0-9]+/i,
+      /[a-z0-9-]*nitro[a-z0-9-]*\.(gift|link|top|xyz|ru|claim|site|buzz)/i,
+      /free-?nitro\.[a-z0-9]+/i
+    ];
+
+    for (const p of spoofPatterns) {
+      if (p.test(lower) && !lower.includes('discord.com') && !lower.includes('discord.gg') && !lower.includes('steamcommunity.com')) {
+        return 'PHISHING_DOMAIN_SPOOF';
+      }
+    }
+
+    if (/\.(exe|scr|bat|vbs|cmd|pif)\b/i.test(lower) && lower.includes('http')) {
+      return 'MALICIOUS_EXECUTABLE_LINK';
+    }
+
+    return null;
+  }
+
+  isJailbreakAttempt(text) {
+    if (!text) return false;
+    const lower = text.toLowerCase();
+    const jailbreakRegexes = [
+      /\bignore\s+all\s+(previous\s+)?instructions\b/i,
+      /\byou\s+are\s+now\s+in\s+dan\s+mode\b/i,
+      /\bsystem\s+prompt\s+override\b/i,
+      /\bdeveloper\s+mode\s+enabled\b/i,
+      /\bact\s+as\s+an?\s+unfiltered\b/i,
+      /\bjailbreak\s+(the\s+)?(ai|bot|system|model|prompt|filter)\b/i,
+      /\bbypass\s+(all\s+|ai\s+|bot\s+)?security\s+rules\b/i,
+      /\b(bot\s+)?give\s+me\s+admin\s+perms?\b/i,
+      /\b(bot\s+)?kick\s+the\s+owner\b/i,
+      /\b(bot\s+)?ban\s+everyone\b/i
+    ];
+
+    return jailbreakRegexes.some(r => r.test(lower));
+  }
+
+  getRecentIncidents(limit = 5) {
+    return this.incidentJournal.slice(-limit).reverse();
+  }
+
+  recordIncident(entry) {
+    this.incidentJournal.push({
+      ...entry,
+      timestamp: Date.now()
+    });
   }
 
   getCommands() {
@@ -222,6 +308,47 @@ class AIModerationModule {
   }
 
   async checkMessage(message) {
+    if (!message.guild || message.author.bot || !message.member) return true;
+
+    // 1. Maintain sliding window context
+    this.trackMessageContext(message);
+
+    // 2. Immediate Server Owner / Administrator Immunity
+    if (message.author.id === message.guild.ownerId ||
+        message.member.permissions?.has(PermissionFlagsBits.Administrator)) {
+      return true;
+    }
+
+    // 3. Instant Lookalike Phishing Domain Detection (Zero latency, zero AI quota)
+    const phishingType = this.detectPhishingDomain(message.content);
+    if (phishingType) {
+      const verdict = {
+        flagged: true,
+        category: 'SCAM_PHISHING',
+        confidence: 1.0,
+        reason: 'Detected malicious lookalike phishing domain or unauthorized executable link.'
+      };
+      this.recordIncident({
+        category: verdict.category,
+        action: 'ENFORCED',
+        user: message.author.tag || message.author.username,
+        channel: message.channel.name,
+        confidence: 100
+      });
+      const guildId = message.guild.id;
+      const cfg = this.db.get(`aimod_${guildId}`) || { enabled: true, action: 'REPORT_ONLY' };
+      await this.executeEnforcement(message, verdict, cfg);
+      message._editx_flagged = true;
+      if (cfg.action === 'REPORT_ONLY' || cfg.action === 'LOG_ONLY') return true;
+      return false;
+    }
+
+    // 4. Anti-Jailbreak / Prompt Injection Defense
+    if (this.isJailbreakAttempt(message.content)) {
+      await message.reply({ content: '🛡️ **Security Alert**: Prompt injection and unauthorized bot control attempts are strictly prohibited.' }).catch(() => {});
+      return false;
+    }
+
     if (message._editx_flagged) return true;
     if (!this.ai && !this.groqKey) return true;
 
@@ -240,10 +367,23 @@ class AIModerationModule {
     }
     this.userCooldowns.set(message.author.id, now);
 
-    // Analyze via Gemini with Server Rules Context
-    const verdict = await this.analyzeText(message.content, `User ${message.author.tag} in #${message.channel.name}`, guildId);
+    // Build sliding window context string
+    const recentContext = (this.channelContextBuffers.get(message.channel.id) || [])
+      .map(m => `[${m.author}]: ${m.content}`)
+      .join('\n');
+
+    // Analyze via Gemini with Server Rules & Conversation Context
+    const verdict = await this.analyzeText(message.content, `Context:\n${recentContext}\nUser ${message.author.tag} in #${message.channel.name}`, guildId);
     if (verdict.flagged && verdict.confidence >= 0.70) {
       this.stats.threatsBlocked++;
+      this.recordIncident({
+        category: verdict.category,
+        action: cfg.action,
+        user: message.author.tag || message.author.username,
+        channel: message.channel.name,
+        confidence: Math.round(verdict.confidence * 100)
+      });
+      message._editx_flagged = true;
       await this.executeEnforcement(message, verdict, cfg);
       // In REPORT_ONLY mode, we do NOT suppress further message processing
       if (cfg.action === 'REPORT_ONLY' || cfg.action === 'LOG_ONLY') {

@@ -58,6 +58,10 @@ class DMReminderModule {
             .setDescription('Set which staff member receives forwarded member DMs and reaction alerts')
             .addUserOption(o => o.setName('user').setDescription('Staff user to receive DM reports').setRequired(true))
         )
+        .addSubcommand(s =>
+          s.setName('invite')
+            .setDescription('Send a one-time DM to members asking them to reply READY for notifications')
+        )
         .addSubcommandGroup(g =>
           g.setName('channel')
             .setDescription('Configure dedicated channel for member DM reports and reactions')
@@ -74,26 +78,6 @@ class DMReminderModule {
               s.setName('reset')
                 .setDescription('Reset reports back to Owner personal DM')
             )
-        ),
-
-      new SlashCommandBuilder()
-        .setName('rules')
-        .setDescription('Manage and synchronize server community rules')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .setDMPermission(false)
-        .addSubcommand(s =>
-          s.setName('update')
-            .setDescription('Scan server and post/update clean luxury community rules in the rules channel')
-            .addChannelOption(o => o.setName('channel').setDescription('Channel to post rules in (default: auto-detected #rules)').addChannelTypes(ChannelType.GuildText))
-        )
-        .addSubcommand(s =>
-          s.setName('view')
-            .setDescription('View current community rules stored in bot memory')
-        )
-        .addSubcommand(s =>
-          s.setName('add')
-            .setDescription('Add a new custom rule or directive for EditX AI to strictly obey')
-            .addStringOption(o => o.setName('instruction').setDescription('The rule or directive for EditX AI to follow').setRequired(true))
         )
     ];
   }
@@ -276,33 +260,47 @@ class DMReminderModule {
 
         // Format relay report for Destination
         const attachmentUrls = Array.from(message.attachments?.values() || []).map(a => a.url);
-        const attachmentText = attachmentUrls.length > 0 ? `\n📎 **Attachments (${attachmentUrls.length}):**\n${attachmentUrls.join('\n')}` : '';
+        const attachmentText = attachmentUrls.length > 0 ? `\n📎 ${attachmentUrls.join(' ')}` : '';
 
-        const relayEmbed = new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setAuthor({ name: `Incoming DM: ${author.tag}`, iconURL: author.displayAvatarURL() })
-          .setTitle('📨 Member Sent a Direct Message to the Bot')
-          .setDescription(
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `👤 **Member:** <@${author.id}> • **${author.tag}** (\`${author.id}\`)\n` +
-            `🏠 **Shared Server:** **${primaryGuild.name}**\n\n` +
-            `💬 **Message Content:**\n> ${content ? content.split('\n').join('\n> ') : '*[No text content]*'}` +
-            `${attachmentText}\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
-          )
-          .setFooter({ text: `Reply with the button below or '!reply ${author.id} <your message>'` })
-          .setTimestamp();
+        if (dest.type === 'channel') {
+          // Clean 2-line format for reports channel:
+          // Line 1: Member mention
+          // Line 2: Message content
+          const reportContent = `<@${author.id}>\n${content || '[Attachment/Media]'}${attachmentText}`;
+          const sentMsg = await dest.target.send({ content: reportContent }).catch(err => {
+            console.warn('[DM RELAY] Failed to relay DM to channel:', err.message);
+          });
+          if (sentMsg && sentMsg.id) {
+            this.utilDb.set(`report_msg_${sentMsg.id}`, author.id);
+          }
+        } else {
+          // Fallback for personal Admin DMs:
+          const relayEmbed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setAuthor({ name: `Incoming DM: ${author.tag}`, iconURL: author.displayAvatarURL() })
+            .setTitle('📨 Member Sent a Direct Message to the Bot')
+            .setDescription(
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `👤 **Member:** <@${author.id}> • **${author.tag}** (\`${author.id}\`)\n` +
+              `🏠 **Shared Server:** **${primaryGuild.name}**\n\n` +
+              `💬 **Message Content:**\n> ${content ? content.split('\n').join('\n> ') : '*[No text content]*'}` +
+              `${attachmentText}\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+            )
+            .setFooter({ text: `Reply with the button below or '!reply ${author.id} <your message>'` })
+            .setTimestamp();
 
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`dmreply_${author.id}`)
-            .setLabel(`✉️ Reply to ${author.username}`)
-            .setStyle(ButtonStyle.Primary)
-        );
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`dmreply_${author.id}`)
+              .setLabel(`✉️ Reply to ${author.username}`)
+              .setStyle(ButtonStyle.Primary)
+          );
 
-        await dest.target.send({ embeds: [relayEmbed], components: [row] }).catch(err => {
-          console.warn('[DM RELAY] Failed to relay DM:', err.message);
-        });
+          await dest.target.send({ embeds: [relayEmbed], components: [row] }).catch(err => {
+            console.warn('[DM RELAY] Failed to relay DM:', err.message);
+          });
+        }
 
         // React with subtle receipt confirmation to member
         await message.react('📬').catch(() => {});
@@ -345,11 +343,74 @@ class DMReminderModule {
   }
 
   /**
+   * Catches native Discord replies in the designated DM reports channel
+   * and routes the staff reply directly to the member's DMs, followed by an in-chat confirmation.
+   */
+  async handleGuildMessage(message) {
+    if (!message || !message.guild || message.author?.bot) return false;
+
+    const reportChanId = this.utilDb.get(`dm_report_channel_${message.guild.id}`);
+    if (!reportChanId || message.channel.id !== reportChanId) return false;
+
+    // Check if message is a reply to another message
+    if (!message.reference?.messageId) return false;
+
+    let refMsg = message.referencedMessage;
+    if (!refMsg && message.channel.messages?.fetch) {
+      refMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+    }
+    if (!refMsg) return false;
+
+    // Extract target user ID:
+    // 1. From stored message ID in DB
+    // 2. Or regex match from Line 1 of referenced message (<@userId>)
+    const dbTargetId = this.utilDb.get(`report_msg_${refMsg.id}`);
+    const match = refMsg.content?.match(/<@!?(\d+)>/);
+    const targetUserId = dbTargetId || (match ? match[1] : null);
+
+    if (!targetUserId) return false;
+
+    const targetUser = await this.client.users.fetch(targetUserId).catch(() => null);
+    if (!targetUser) {
+      await message.reply({ content: `❌ Member with ID \`${targetUserId}\` could not be found.` }).catch(() => {});
+      return true;
+    }
+
+    const replyContent = (message.content || '').trim();
+    if (!replyContent) return false;
+
+    const staffEmbed = new EmbedBuilder()
+      .setColor(0x5865F2)
+      .setAuthor({
+        name: `${message.guild.name} • Staff Response`,
+        iconURL: (message.guild.iconURL && typeof message.guild.iconURL === 'function') ? message.guild.iconURL({ dynamic: true }) : undefined
+      })
+      .setTitle('📬 Response from Server Staff')
+      .setDescription(replyContent)
+      .setFooter({ text: 'You can reply directly to this message.' })
+      .setTimestamp();
+
+    try {
+      await targetUser.send({ embeds: [staffEmbed] });
+      await message.reply({ content: `✅ Sent to <@${targetUserId}>:\n> ${replyContent}` }).catch(() => {});
+      return true;
+    } catch (err) {
+      await message.reply({ content: `❌ Could not deliver to <@${targetUserId}> (DMs closed or bot blocked): ${err.message}` }).catch(() => {});
+      return true;
+    }
+  }
+
+  /**
    * Unified interaction handler for buttons, modals, and slash commands
    */
   async handleInteraction(interaction) {
+    if (!interaction) return false;
+    const isBtn = typeof interaction.isButton === 'function' ? interaction.isButton() : false;
+    const isModal = typeof interaction.isModalSubmit === 'function' ? interaction.isModalSubmit() : false;
+    const isChat = typeof interaction.isChatInputCommand === 'function' ? interaction.isChatInputCommand() : !!interaction.commandName;
+
     // 1. Reply Button click in Admin DM
-    if (interaction.isButton() && interaction.customId.startsWith('dmreply_')) {
+    if (isBtn && interaction.customId?.startsWith('dmreply_')) {
       const targetUserId = interaction.customId.replace('dmreply_', '');
       const modal = new ModalBuilder()
         .setCustomId(`dmreply_modal_${targetUserId}`)
@@ -368,7 +429,7 @@ class DMReminderModule {
     }
 
     // 2. Modal Submit for DM Reply
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('dmreply_modal_')) {
+    if (isModal && interaction.customId?.startsWith('dmreply_modal_')) {
       const targetUserId = interaction.customId.replace('dmreply_modal_', '');
       const replyText = interaction.fields.getTextInputValue('reply_text');
 
@@ -399,7 +460,7 @@ class DMReminderModule {
     }
 
     // 3. Acknowledgment Button in Member DM: "ack_dm_<broadcastId>"
-    if (interaction.isButton() && interaction.customId.startsWith('ack_dm_')) {
+    if (isBtn && interaction.customId?.startsWith('ack_dm_')) {
       const broadcastId = interaction.customId.replace('ack_dm_', '');
       const user = interaction.user;
 
@@ -434,7 +495,7 @@ class DMReminderModule {
     }
 
     // 4. Slash Commands (/dmblast and /rules)
-    if (!interaction.isChatInputCommand()) return false;
+    if (!isChat) return false;
     const { commandName, options, guild, user } = interaction;
 
     if (commandName === 'dmblast') {
@@ -528,6 +589,76 @@ class DMReminderModule {
           ephemeral: true
         });
         return true;
+      }
+
+      // /dmblast invite (strictly one-time opt-in broadcast per member)
+      if (sub === 'invite') {
+        await interaction.deferReply({ ephemeral: true });
+
+        const onboardKey = `onboarded_members_${guild.id}`;
+        const onboarded = this.db.get(onboardKey) || {};
+        const subsKey = `subscribers_${guild.id}`;
+        const subs = this.db.get(subsKey) || {};
+
+        let members = [];
+        try {
+          if (guild.members?.fetch) {
+            const fetched = await guild.members.fetch().catch(() => null);
+            if (fetched) members = Array.from(fetched.values());
+          }
+          if (members.length === 0 && guild.members?.cache) {
+            members = Array.from(guild.members.cache.values());
+          }
+        } catch (e) {
+          if (guild.members?.cache) members = Array.from(guild.members.cache.values());
+        }
+
+        let sentCount = 0;
+        let skippedCount = 0;
+        let failedCount = 0;
+
+        const inviteText =
+          `👋 Hey! **${guild.name}** has direct updates & announcements.\n` +
+          `If you are interested to get notifications in DM, please type **READY**.`;
+
+        for (const member of members) {
+          const userObj = member.user || member;
+          if (!userObj || userObj.bot) continue;
+
+          // Strictly once: Skip if already invited or already subscribed
+          if (onboarded[userObj.id] || (subs[userObj.id] && subs[userObj.id].active)) {
+            skippedCount++;
+            continue;
+          }
+
+          try {
+            const u = await this.client.users.fetch(userObj.id).catch(() => null);
+            if (u) {
+              await u.send(inviteText);
+              sentCount++;
+              onboarded[userObj.id] = Date.now();
+            } else {
+              failedCount++;
+            }
+          } catch (err) {
+            failedCount++;
+            // Still mark as attempted so we don't retry members who closed DMs
+            onboarded[userObj.id] = Date.now();
+          }
+
+          // Micro-delay between DMs to respect Discord rate limits
+          await new Promise(r => setTimeout(r, 100));
+        }
+
+        this.db.set(onboardKey, onboarded);
+
+        return interaction.editReply({
+          content: `🚀 **One-Time Opt-in Invite Broadcast Complete!**\n` +
+            `• 📩 **DMs Sent:** \`${sentCount}\`\n` +
+            `• ⏭️ **Skipped (Already invited or READY):** \`${skippedCount}\`\n` +
+            `• ❌ **Unreachable (Closed DMs/Blocked):** \`${failedCount}\`\n` +
+            `*Strictly recorded in database: no member will ever receive this invitation more than once.*`
+        });
       }
 
       // /dmblast channel [set|view|reset]
@@ -654,139 +785,6 @@ class DMReminderModule {
             `• Successfully Delivered: **${success} member(s)**\n` +
             `• Unreachable (DMs disabled): **${failed} member(s)**\n` +
             `• Interactive Buttons: Active (Acknowledgment clicks and DM replies will report to your DM)`
-        });
-        return true;
-      }
-    }
-
-    // 5. /rules update and /rules view
-    if (commandName === 'rules') {
-      const sub = options.getSubcommand();
-
-      if (sub === 'view') {
-        const storedRules = this.secDb.get(`rules_${guild.id}`) ||
-          '1. Respect all members and maintain civil discussions.\n2. No spam, unsolicited promotion, or malicious links.\n3. Keep media in respective showcase channels.\n4. Follow all Discord Terms of Service.';
-
-        const viewEmbed = new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle(`📜 Active Community Rules • ${guild.name}`)
-          .setDescription(storedRules)
-          .setFooter({ text: 'Use /rules update to refresh and post to #rules' })
-          .setTimestamp();
-
-        await interaction.reply({ embeds: [viewEmbed], ephemeral: true });
-        return true;
-      }
-
-      if (sub === 'add') {
-        const instruction = options.getString('instruction');
-        if (this.client.botMemory && typeof this.client.botMemory.addDirective === 'function') {
-          await interaction.deferReply({ ephemeral: true });
-          const result = await this.client.botMemory.addDirective(guild, instruction, user);
-          if (result.success) {
-            await interaction.editReply(`🧠 **Directive Learned & Saved to Memory!**\n• **Rule:** "${instruction}"\n• **Rules Channel:** ${result.channelId ? `<#${result.channelId}>` : '`#bot-rules`'}\nI will strictly follow this instruction in all future responses.`);
-          } else {
-            await interaction.editReply(`❌ **Failed to save directive:** ${result.error}`);
-          }
-          return true;
-        }
-        await interaction.reply({ content: '❌ Bot Memory module is offline.', ephemeral: true });
-        return true;
-      }
-
-      if (sub === 'update') {
-        await interaction.deferReply({ ephemeral: true });
-
-        // Auto-discover public rules channel or use specified channel
-        let targetChan = options.getChannel('channel');
-        if (!targetChan && guild.channels?.cache) {
-          const chanList = Array.from(guild.channels.cache.values()).filter(Boolean);
-          targetChan = chanList.find(c =>
-            c.type === ChannelType.GuildText && (
-              /^(?:📜・)?rules$/i.test(c.name) ||
-              /rules[-_]?and[-_]?info/i.test(c.name) ||
-              /server[-_]?rules/i.test(c.name) ||
-              /guidelines/i.test(c.name) ||
-              /welcome[-_]?rules/i.test(c.name)
-            )
-          );
-        }
-
-        if (!targetChan) {
-          await interaction.editReply({
-            content: '❌ Could not find a dedicated `#rules` channel. Please create one or select a channel using `/rules update channel:#your-rules-channel`.'
-          });
-          return true;
-        }
-
-        // Deep-scan server for context if memory module is available
-        if (this.client.botMemory && typeof this.client.botMemory.scanServer === 'function') {
-          await this.client.botMemory.scanServer(guild, user).catch(() => {});
-        }
-
-        const serverName = guild.name;
-        const icon = (guild.iconURL && typeof guild.iconURL === 'function') ? guild.iconURL({ dynamic: true }) : undefined;
-
-        // Build comprehensive luxury rules embed
-        const rulesEmbed = new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setAuthor({ name: `${serverName} • Official Guidelines`, iconURL: icon })
-          .setTitle(`📜 Community Rules & Code of Conduct`)
-          .setDescription(
-            `Welcome to **${serverName}**! By participating in this server, all members agree to adhere to our community guidelines.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
-          )
-          .addFields(
-            {
-              name: '1️⃣ Respect & Professional Conduct',
-              value: 'Treat every creator, editor, and client with respect. Harassment, hate speech, discrimination, toxicity, and personal attacks will result in an immediate ban.'
-            },
-            {
-              name: '2️⃣ Zero Tolerance for Phishing & Malicious Content',
-              value: 'Never post unverified executable files (`.exe`, `.scr`, `.bat`), fake Nitro links, or phishing domains. Suspicious links are instantly trapped by Autonomous Sentinel.'
-            },
-            {
-              name: '3️⃣ Media & Showcase Guidelines',
-              value: 'Keep video edits, VFX reels, and graphics in dedicated showcase channels. Do not spam links or media in general discussions without context.'
-            },
-            {
-              name: '4️⃣ Hiring & Freelance Transparency',
-              value: 'All commission offers and hiring posts must state a verifiable budget, turnaround time, and payment terms. Free work requests are strictly prohibited in paid channels.'
-            },
-            {
-              name: '5️⃣ No Unsolicited Advertising or DM Promotion',
-              value: 'Do not mass-DM server members with unsolicited invites, services, or self-promotion. Unsolicited advertisement DMs will be reported and banned.'
-            },
-            {
-              name: '6️⃣ Staff Direction & Discord ToS',
-              value: 'Follow instructions from server staff and moderators. All activities must comply with [Discord Community Guidelines](https://discord.com/guidelines) and [Terms of Service](https://discord.com/terms).'
-            }
-          )
-          .setFooter({ text: `${serverName} • Rules are enforced 24/7 by EditX Autonomous Sentinel` })
-          .setTimestamp();
-
-        // Update database rules
-        const rulesText =
-          '1. Respect & Professional Conduct\n' +
-          '2. Zero Tolerance for Phishing & Malicious Content\n' +
-          '3. Media & Showcase Guidelines in dedicated channels\n' +
-          '4. Hiring & Freelance Transparency (Budget required)\n' +
-          '5. No Unsolicited Advertising or DM Promotion\n' +
-          '6. Staff Direction & Discord Terms of Service Compliance';
-
-        this.secDb.set(`rules_${guild.id}`, rulesText);
-
-        // Also sync to bot memory directives
-        if (this.client.botMemory && typeof this.client.botMemory.syncDirectives === 'function') {
-          await this.client.botMemory.syncDirectives(guild).catch(() => {});
-        }
-
-        // Post to rules channel
-        await targetChan.send({ embeds: [rulesEmbed] });
-
-        await interaction.editReply({
-          content: `✅ **Server Rules Successfully Published & Synchronized!**\n` +
-            `• Posted to: <#${targetChan.id}>\n` +
-            `• Synchronized with: EditX AI Memory & Sentinel AutoMod`
         });
         return true;
       }

@@ -16,16 +16,13 @@ const LevelingModule = require('./modules/leveling');
 const UtilityModule = require('./modules/utility');
 const GiveawaysModule = require('./modules/giveaways');
 const TicketsModule = require('./modules/tickets');
-const MusicModule = require('./modules/music');
 const StarboardModule = require('./modules/starboard');
 const TagsModule = require('./modules/tags');
-const VerificationModule = require('./modules/verification');
 const SocialAlertsModule = require('./modules/social_alerts');
 const AIModerationModule = require('./modules/ai_moderator');
 const DecorationModule = require('./modules/decoration');
 const QuickSetupModule = require('./modules/quick_setup');
 const HiringModule = require('./modules/hiring');
-const AutonomousSentinelModule = require('./modules/autonomous_sentinel');
 const HousekeeperModule = require('./modules/housekeeper');
 const TranslatorModule = require('./modules/translator');
 const AIChatModule = require('./modules/ai_chat');
@@ -1013,17 +1010,17 @@ async function runTests() {
       new UtilityModule(mockClient, db),
       new GiveawaysModule(mockClient, db),
       new TicketsModule(mockClient, db),
-      new MusicModule(mockClient, db),
       new StarboardModule(mockClient, db),
       new TagsModule(mockClient, db),
-      new VerificationModule(mockClient, db),
       new SocialAlertsModule(mockClient, db),
       new AIModerationModule(mockClient, db),
       new DecorationModule(mockClient, db),
       new HiringModule(mockClient, db),
       new HousekeeperModule(mockClient, db),
       new TranslatorModule(mockClient, db),
-      new AIChatModule(mockClient, db)
+      new AIChatModule(mockClient, db),
+      new BotMemoryModule(mockClient, db),
+      new DMReminderModule(mockClient, db)
     ];
 
     const allSlashCommands = modules.flatMap(m => m.getCommands());
@@ -1290,9 +1287,9 @@ async function runTests() {
     assert.strictEqual(warningSent, true, 'Warning explaining button portal must be sent');
   });
 
-  // 26. AUTONOMOUS SENTINEL & ANTI-JAILBREAK DEFENSE
+  // 26. AUTONOMOUS SENTINEL & ANTI-JAILBREAK DEFENSE (MERGED INTO AI MODERATION)
   await test('26. Autonomous Sentinel - Sliding Buffer, Phishing Domain Analyzer & Anti-Jailbreak', async () => {
-    const sentinel = new AutonomousSentinelModule(mockClient, db);
+    const sentinel = new AIModerationModule(mockClient, db);
 
     // Test sliding window context buffer
     const channelId = 'chan_chat_1';
@@ -1491,7 +1488,7 @@ async function runTests() {
 
   // 30. VERIFICATION GATE & AI ASSISTANT
   await test('30. Verification Gate & AI Assistant Engine', async () => {
-    const verMod = new VerificationModule(mockClient, db);
+    const verMod = new RolesModule(mockClient, db);
     const aiMod = new AIChatModule(mockClient, db);
 
     // 1. Test /verify setup
@@ -2187,9 +2184,14 @@ async function runTests() {
 
     // 1. Verify getCommands registration
     const cmds = dmMod.getCommands();
-    assert.strictEqual(cmds.length, 2, 'Must export /dmblast and /rules slash commands');
+    assert.strictEqual(cmds.length, 1, 'Must export /dmblast slash command');
     assert.strictEqual(cmds[0].name, 'dmblast');
-    assert.strictEqual(cmds[1].name, 'rules');
+
+    const memMod = new BotMemoryModule(mockClient, db);
+    mockClient.botMemory = memMod;
+    memMod.syncDirectives = async (guild) => { syncedDirectives = true; };
+    const memCmds = memMod.getCommands();
+    assert.ok(memCmds.some(c => c.name === 'rules'), 'BotMemoryModule must export /rules slash command');
 
     // 2. Test Member Opt-in with "READY"
     let readyReplies = [];
@@ -2336,7 +2338,7 @@ async function runTests() {
       editReply: async (payload) => { rulesEditReply = payload; }
     };
 
-    await dmMod.handleCommand(mockRulesInteraction);
+    await memMod.handleCommand(mockRulesInteraction);
     assert.strictEqual(rulesPosts.length, 1, 'Must post rules embed to #rules channel');
     assert.ok(rulesPosts[0].embeds[0].data.title.includes('Community Rules'), 'Must format official rules embed');
     assert.strictEqual(syncedDirectives, true, 'Must sync directives with bot memory');
@@ -2355,9 +2357,11 @@ async function runTests() {
       options: {
         getSubcommand: () => 'view'
       },
+      deferReply: async () => {},
+      editReply: async (payload) => { rulesViewReply = payload; },
       reply: async (payload) => { rulesViewReply = payload; }
     };
-    await dmMod.handleCommand(mockRulesViewInteraction);
+    await memMod.handleCommand(mockRulesViewInteraction);
     assert.ok(rulesViewReply && rulesViewReply.embeds[0].data.title.includes('Active Community Rules'), 'Must show rules view embed');
 
     // 10. Test /dmblast channel set: route member DMs to dedicated server channel instead of personal DM
@@ -2367,8 +2371,17 @@ async function runTests() {
       name: 'dm-reports',
       isTextBased: () => true,
       send: async (payload) => {
-        reportsChannelMessages.push(payload);
-        return { id: `report_msg_${Date.now()}` };
+        const msgObj = {
+          id: `report_msg_${Date.now()}`,
+          channel: staffReportsChannel,
+          content: payload.content,
+          embeds: payload.embeds || []
+        };
+        reportsChannelMessages.push(msgObj);
+        return msgObj;
+      },
+      messages: {
+        fetch: async (id) => reportsChannelMessages.find(m => m.id === id) || null
       }
     };
     dmGuild.channels.cache.set('chan_staff_reports_888', staffReportsChannel);
@@ -2392,7 +2405,7 @@ async function runTests() {
     await dmMod.handleCommand(mockChannelSetInteraction);
     assert.ok(channelSetReply && channelSetReply.content.includes('DM Reports Channel Configured'), 'Must configure reports channel');
 
-    // 11. Member sends inquiry -> routed to dedicated channel, keeping Admin private DM clean
+    // 11. Member sends inquiry -> routed to dedicated channel in clean 2-line format (<@id>\n<msg>)
     const memberNewInquiry = {
       author: memberUser,
       content: 'Can someone review my edit draft in the reports channel?',
@@ -2402,7 +2415,74 @@ async function runTests() {
     };
     await dmMod.handleDirectMessage(memberNewInquiry);
     assert.strictEqual(reportsChannelMessages.length, 1, 'Member DM must be forwarded to dedicated reports channel');
-    assert.ok(reportsChannelMessages[0].embeds[0].data.description.includes('review my edit draft'), 'Report channel must receive member inquiry');
+    const lines = reportsChannelMessages[0].content.split('\n');
+    assert.strictEqual(lines[0], `<@${memberUser.id}>`, 'First line must mention member ID');
+    assert.ok(lines[1].includes('review my edit draft'), 'Second line must contain member message content');
+
+    // 12. Admin replies to the 2-line message in reports channel -> forwards to member DM + sends confirmation in chat
+    let adminConfirmation = null;
+    let deliveredDMsToMember = [];
+    memberUser.send = async (payload) => {
+      deliveredDMsToMember.push(payload);
+      return payload;
+    };
+
+    const adminChannelReply = {
+      guild: dmGuild,
+      channel: staffReportsChannel,
+      author: adminUser,
+      content: 'I checked your draft, looks great!',
+      reference: {
+        messageId: reportsChannelMessages[0].id
+      },
+      referencedMessage: reportsChannelMessages[0],
+      reply: async (payload) => { adminConfirmation = payload; }
+    };
+
+    const handled = await dmMod.handleGuildMessage(adminChannelReply);
+    assert.strictEqual(handled, true, 'Module must process reply in reports channel');
+    assert.strictEqual(deliveredDMsToMember.length, 1, 'Admin reply must be delivered to member DMs');
+    assert.ok(deliveredDMsToMember[0].embeds[0].data.description.includes('looks great'), 'Member must receive staff reply content');
+    assert.ok(adminConfirmation && adminConfirmation.content.includes(`Sent to <@${memberUser.id}>`), 'Admin must receive in-chat confirmation quoting the reply');
+    assert.ok(adminConfirmation.content.includes('looks great'), 'Confirmation must quote the reply content');
+
+    // 13. Test /dmblast invite (strictly one-time opt-in broadcast)
+    let nonSubUserDMs = [];
+    const nonSubUser = {
+      id: 'new_member_222',
+      username: 'NewMember',
+      tag: 'NewMember#0002',
+      bot: false,
+      send: async (msg) => { nonSubUserDMs.push(msg); }
+    };
+    mockUsers.set('new_member_222', nonSubUser);
+    dmGuild.members.cache.set('new_member_222', { user: nonSubUser, id: 'new_member_222' });
+
+    let inviteReply = null;
+    const mockInviteInteraction = {
+      commandName: 'dmblast',
+      guild: dmGuild,
+      user: adminUser,
+      isButton: () => false,
+      isChatInputCommand: () => true,
+      options: {
+        getSubcommand: () => 'invite'
+      },
+      deferReply: async () => {},
+      editReply: async (payload) => { inviteReply = payload; }
+    };
+
+    // First blast: invites new non-subscribed members
+    await dmMod.handleCommand(mockInviteInteraction);
+    assert.ok(inviteReply && inviteReply.content.includes('One-Time Opt-in Invite Broadcast Complete'), 'Must confirm invite blast');
+    assert.strictEqual(nonSubUserDMs.length, 1, 'Non-subscribed member must receive invite DM');
+    assert.ok(nonSubUserDMs[0].includes('READY'), 'Invite message must ask user to type READY');
+
+    // Second blast: strictly once, so member is skipped!
+    inviteReply = null;
+    await dmMod.handleCommand(mockInviteInteraction);
+    assert.strictEqual(nonSubUserDMs.length, 1, 'Member must NOT receive invitation a second time');
+    assert.ok(inviteReply.content.includes('• 📩 **DMs Sent:** `0`'), 'Second invite blast must send 0 new DMs');
   });
 
   console.log('\n====================================================');

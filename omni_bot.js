@@ -39,7 +39,6 @@ const DecorationModule = require('./modules/decoration');
 const RolesModule = require('./modules/roles');
 const LoggingModule = require('./modules/logging');
 const AIModerationModule = require('./modules/ai_moderator');
-const AutonomousSentinelModule = require('./modules/autonomous_sentinel');
 const HousekeeperModule = require('./modules/housekeeper');
 const TagsModule = require('./modules/tags');
 const HiringModule = require('./modules/hiring');
@@ -47,10 +46,8 @@ const TranslatorModule = require('./modules/translator');
 const LevelingModule = require('./modules/leveling');
 const GiveawaysModule = require('./modules/giveaways');
 const StarboardModule = require('./modules/starboard');
-const VerificationModule = require('./modules/verification');
 const SocialAlertsModule = require('./modules/social_alerts');
 const AIChatModule = require('./modules/ai_chat');
-const MusicModule = require('./modules/music');
 const BotMemoryModule = require('./modules/bot_memory');
 const DMReminderModule = require('./modules/dm_reminder');
 
@@ -114,18 +111,15 @@ const moderation = new ModerationModule(client, db);
 const decoration = new DecorationModule(client, db);
 const logging = new LoggingModule(client, db);
 const aiModerator = new AIModerationModule(client, db);
-const sentinel = new AutonomousSentinelModule(client, db);
-const housekeeper = new HousekeeperModule(client, db, sentinel);
+const housekeeper = new HousekeeperModule(client, db, aiModerator);
 const tags = new TagsModule(client, db);
 const hiring = new HiringModule(client, db);
 const translator = new TranslatorModule(client, db);
 const giveaways = new GiveawaysModule(client, db);
 const starboard = new StarboardModule(client, db);
-const verification = new VerificationModule(client, db);
 const socialAlerts = new SocialAlertsModule(client, db);
 const aiChat = new AIChatModule(client, db, botMemory);
 aiChat.setHousekeeper(housekeeper);
-const music = new MusicModule(client);
 const dmReminder = new DMReminderModule(client, db);
 
 // All active modules list
@@ -139,7 +133,6 @@ const modules = [
   roles,
   logging,
   aiModerator,
-  sentinel,
   housekeeper,
   tags,
   hiring,
@@ -147,10 +140,8 @@ const modules = [
   leveling,
   giveaways,
   starboard,
-  verification,
   socialAlerts,
   aiChat,
-  music,
   dmReminder
 ];
 
@@ -253,6 +244,10 @@ client.on(Events.MessageCreate, async (message) => {
     return;
   }
 
+  // Handle staff native reply in DM reports channel
+  const handledReportReply = await dmReminder.handleGuildMessage(message);
+  if (handledReportReply) return;
+
   // Real-time custom directives ingestion in #bot-rules
   await botMemory.handleRulesChannelEvent(message, 'create');
 
@@ -263,9 +258,9 @@ client.on(Events.MessageCreate, async (message) => {
   const isHoneypot = await moderation.checkHoneypot(message);
   if (isHoneypot) return;
 
-  // 2. Autonomous Sentinel (Modcord-style multi-message sliding-window context evaluation)
-  const handledBySentinel = await sentinel.checkMessage(message);
-  if (handledBySentinel) return;
+  // 2. AI Moderation & Security Sentinel (Sliding context, instant phishing detection, jailbreak guard & mod copilot)
+  const allowed = await aiModerator.checkMessage(message);
+  if (allowed === false) return;
 
   // 3. Staff Ping AI Responder (Answers questions or auto-forwards to human staff)
   const handledStaffPing = await housekeeper.handleStaffPing(message);
@@ -285,9 +280,6 @@ client.on(Events.MessageCreate, async (message) => {
       } catch (tErr) {}
     }
   }
-
-  // 5. AI Moderation Copilot: Scans suspicious content and reports to mods in report-only mode
-  await aiModerator.checkMessage(message);
 
   // 6. Utility & Invites Plain-Text Commands & Bump Buddy
   utility.checkBump(message);

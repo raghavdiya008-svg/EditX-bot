@@ -76,7 +76,17 @@ class RolesModule {
         .addSubcommand(s => s.setName('remove').setDescription('Remove level reward')
           .addIntegerOption(o => o.setName('level').setDescription('Target level').setRequired(true)))
         .addSubcommand(s => s.setName('list').setDescription('List all configured level role rewards'))
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles).setDMPermission(false)
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles).setDMPermission(false),
+
+      new SlashCommandBuilder().setName('verify').setDescription('Server entry verification portal management')
+        .addSubcommand(sub => sub.setName('setup').setDescription('Deploy interactive server entry verification portal')
+          .addRoleOption(o => o.setName('role').setDescription('The verified member role to assign').setRequired(true))
+          .addChannelOption(o => o.setName('channel').setDescription('Channel to deploy portal (defaults to current channel)'))
+          .addStringOption(o => o.setName('title').setDescription('Custom panel title'))
+          .addStringOption(o => o.setName('description').setDescription('Custom instructions'))
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDMPermission(false)
     ];
   }
 
@@ -286,6 +296,63 @@ class RolesModule {
       }
     }
 
+    if (commandName === 'verify') {
+      const sub = options.getSubcommand();
+      if (sub !== 'setup') return false;
+
+      const role = options.getRole('role');
+      const targetChannel = options.getChannel('channel') || interaction.channel;
+      const rawTitle = options.getString('title') || 'Security Verification Gate';
+      const title = rawTitle.replace(/^🛡️[・\s]*/, '');
+      const customDesc = options.getString('description');
+
+      const defaultDesc =
+        `Welcome to **${interaction.guild.name}**!\n` +
+        `To protect our community from automated spam and raids, all members must complete identity verification.\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `▸ 📜 **Community Standards**: Adhere to all server guidelines and policies.\n` +
+        `▸ 🔓 **Unlocked Role**: Grants <@&${role.id}> and reveals all community channels.\n` +
+        `▸ ⚡ **Instant Verification**: Click the button below to verify immediately.\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
+      const embed = new EmbedBuilder()
+        .setColor(0x10B981)
+        .setTitle(`🛡️・${title}`)
+        .setDescription(customDesc ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${customDesc}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━` : defaultDesc)
+        .setFooter({
+          text: `${interaction.guild.name} Security System • Anti-Raid Active`,
+          iconURL: (interaction.guild.iconURL && typeof interaction.guild.iconURL === 'function') ? interaction.guild.iconURL({ dynamic: true }) : undefined
+        });
+
+      if (interaction.guild.iconURL && typeof interaction.guild.iconURL === 'function') {
+        const icon = interaction.guild.iconURL({ dynamic: true, size: 128 });
+        if (icon) embed.setThumbnail(icon);
+      }
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`verify_btn_${role.id}`)
+          .setLabel('Complete Verification')
+          .setEmoji('🛡️')
+          .setStyle(ButtonStyle.Success)
+      );
+
+      try {
+        await targetChannel.send({ embeds: [embed], components: [row] });
+        if (this.db) {
+          this.db.set(`verification_${interaction.guild.id}`, {
+            roleId: role.id,
+            channelId: targetChannel.id,
+            createdAt: Date.now()
+          });
+        }
+
+        return interaction.reply({ content: `✅ Verification panel successfully deployed to <#${targetChannel.id}>. Target role: <@&${role.id}>.`, ephemeral: true });
+      } catch (err) {
+        return interaction.reply({ content: `❌ Failed to deploy verification panel: ${err.message}`, ephemeral: true });
+      }
+    }
+
     return false;
   }
 
@@ -379,7 +446,7 @@ class RolesModule {
         }
 
         try {
-          await member.roles.add(role.id);
+          await member.roles.add(role);
           return sendResponse(`🎉 **Verification Complete!** You have been granted the **${role.name}** role. Welcome to **${interaction.guild.name}**!`);
         } catch (err) {
           return sendResponse(`❌ Could not assign verified role. Ensure the bot role is positioned higher than <@&${role.id}>.`);

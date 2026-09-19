@@ -20,10 +20,8 @@ const HiringModule = require('./modules/hiring');
 const LevelingModule = require('./modules/leveling');
 const GiveawaysModule = require('./modules/giveaways');
 const StarboardModule = require('./modules/starboard');
-const VerificationModule = require('./modules/verification');
 const SocialAlertsModule = require('./modules/social_alerts');
 const AIChatModule = require('./modules/ai_chat');
-const MusicModule = require('./modules/music');
 const BotMemoryModule = require('./modules/bot_memory');
 const TranslatorModule = require('./modules/translator');
 const HousekeeperModule = require('./modules/housekeeper');
@@ -72,10 +70,8 @@ const modules = [
   new LevelingModule(dummyClient, dummyDb),
   new GiveawaysModule(dummyClient, dummyDb),
   new StarboardModule(dummyClient, dummyDb),
-  new VerificationModule(dummyClient, dummyDb),
   new SocialAlertsModule(dummyClient, dummyDb),
   new AIChatModule(dummyClient, dummyDb),
-  new MusicModule(dummyClient),
   new BotMemoryModule(dummyClient, dummyDb),
   new TranslatorModule(dummyClient, dummyDb),
   new HousekeeperModule(dummyClient, dummyDb),
