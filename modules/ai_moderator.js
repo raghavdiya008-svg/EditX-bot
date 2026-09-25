@@ -345,6 +345,19 @@ class AIModerationModule {
 
     // 4. Anti-Jailbreak / Prompt Injection Defense
     if (this.isJailbreakAttempt(message.content)) {
+      const guildId = message.guild.id;
+      const cfg = this.db.get(`aimod_${guildId}`) || { enabled: true, action: 'REPORT_ONLY' };
+      if (cfg.action === 'REPORT_ONLY' || cfg.action === 'LOG_ONLY') {
+        const verdict = {
+          flagged: true,
+          category: 'SECURITY_EXPLOIT',
+          confidence: 1.0,
+          reason: 'Detected prompt injection or unauthorized bot control attempt.'
+        };
+        await this.executeEnforcement(message, verdict, cfg);
+        message._editx_flagged = true;
+        return true;
+      }
       await message.reply({ content: '🛡️ **Security Alert**: Prompt injection and unauthorized bot control attempts are strictly prohibited.' }).catch(() => {});
       return false;
     }

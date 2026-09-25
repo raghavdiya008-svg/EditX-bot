@@ -1,4 +1,4 @@
-const { PermissionFlagsBits, EmbedBuilder, SlashCommandBuilder, ChannelType, AuditLogEvent } = require('discord.js');
+const { PermissionFlagsBits, EmbedBuilder, SlashCommandBuilder, ChannelType, AuditLogEvent, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 class ModerationModule {
   constructor(client, db) {
@@ -163,6 +163,7 @@ class ModerationModule {
 
       new SlashCommandBuilder().setName('automod').setDescription('Configure automated chat security filters')
         .addBooleanOption(o => o.setName('enabled').setDescription('Toggle master automod').setRequired(true))
+        .addBooleanOption(o => o.setName('report_only').setDescription('Report violations without auto-punishing (Default: true)'))
         .addBooleanOption(o => o.setName('anti_invite').setDescription('Block unauthorized Discord invites'))
         .addBooleanOption(o => o.setName('anti_caps').setDescription('Block excessive caps (>70%)'))
         .addBooleanOption(o => o.setName('anti_spam').setDescription('Block rapid message floods'))
@@ -570,11 +571,12 @@ class ModerationModule {
 
       case 'automod': {
         config.automod = options.getBoolean('enabled');
+        if (options.getBoolean('report_only') !== null) config.reportOnly = options.getBoolean('report_only');
         if (options.getBoolean('anti_invite') !== null) config.antiInvite = options.getBoolean('anti_invite');
         if (options.getBoolean('anti_caps') !== null) config.antiCaps = options.getBoolean('anti_caps');
         if (options.getBoolean('anti_spam') !== null) config.antiSpam = options.getBoolean('anti_spam');
         this.db.set(guild.id, config);
-        return interaction.reply({ content: `✅ AutoMod settings updated. Master toggle: **${config.automod ? 'ON' : 'OFF'}**.`, ephemeral: true });
+        return interaction.reply({ content: `🛡️ AutoMod settings updated. Master toggle: **${config.automod ? 'ON' : 'OFF'}** | Report-Only: **${config.reportOnly !== false ? 'ON' : 'OFF'}**.`, ephemeral: true });
       }
 
       case 'filter': {
@@ -1219,6 +1221,93 @@ class ModerationModule {
 
   async punish(message, reason, action, durationMs = 0) {
     try {
+      const guild = message.guild;
+      if (!guild) return;
+      const guildId = guild.id;
+      const secConfig = this.db.get(guildId) || {};
+      const aiConfig = this.db.get(`aimod_${guildId}`) || { action: 'REPORT_ONLY' };
+      const isReportOnly = secConfig.reportOnly ?? (aiConfig.action === 'REPORT_ONLY' || aiConfig.action === 'LOG_ONLY');
+
+      if (isReportOnly) {
+        // REPORT-ONLY / COPILOT MODE:
+        // No auto-delete or auto-punish. Dispatches rich incident card with 1-click action buttons to alert/modlog channel.
+        const resolveChan = async (id) => {
+          if (!id) return null;
+          let ch = guild.channels.cache?.get(id);
+          if (!ch && typeof guild.channels.fetch === 'function') {
+            const fetched = await guild.channels.fetch(id).catch(() => null);
+            if (fetched && typeof fetched.send === 'function') ch = fetched;
+            else if (fetched && typeof fetched.get === 'function' && fetched.has(id)) ch = fetched.get(id);
+          }
+          return (ch && typeof ch.send === 'function') ? ch : null;
+        };
+
+        let logChan = null;
+        if (aiConfig.alertChannel) logChan = await resolveChan(aiConfig.alertChannel);
+        if (!logChan) {
+          const modReportChan = this.db.get(`mod_report_chan_${guildId}`);
+          if (modReportChan) logChan = await resolveChan(modReportChan);
+        }
+        if (!logChan) {
+          const cfgData = this.configDb?.get(guildId);
+          if (cfgData?.logChannelId) logChan = await resolveChan(cfgData.logChannelId);
+          if (!logChan && cfgData?.modLogChannelId) logChan = await resolveChan(cfgData.modLogChannelId);
+        }
+        if (!logChan && guild.channels?.cache) {
+          const chanList = Array.from(guild.channels.cache.values());
+          logChan = chanList.find(c =>
+            c.type === ChannelType.GuildText && typeof c.send === 'function' && (
+              c.name.includes('mod-logs') ||
+              c.name.includes('modlogs') ||
+              c.name.includes('moderator-only') ||
+              c.name.includes('staff') ||
+              c.name.includes('logs') ||
+              c.name.includes('reports')
+            )
+          );
+        }
+        if (!logChan) logChan = guild.systemChannel;
+
+        if (logChan && typeof logChan.send === 'function') {
+          const embed = new EmbedBuilder()
+            .setColor(0xF59E0B)
+            .setTitle(`🚨・AUTOMOD INCIDENT REPORT // ${reason}`)
+            .setDescription(
+              `An automod violation was flagged for moderator review in **Report-Only Mode**.\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `▸ 👤 **Offender**: <@${message.author.id}> (\`${message.author.tag || message.author.username}\` • ID: \`${message.author.id}\`)\n` +
+              `▸ 📍 **Channel**: <#${message.channel.id}> — [Jump to Message](${message.url || '#'})\n` +
+              `▸ ⚠️ **Infraction**: \`${reason}\` (Recommended Action: \`${action}\`)\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `**Message Content:**\n` +
+              `\`\`\`\n${(message.content || 'No text content').slice(0, 1000)}\n\`\`\``
+            )
+            .setFooter({ text: `${guild.name} AutoMod Sentinel • Report-Only Mode` })
+            .setTimestamp();
+
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`btn_mod_del_${message.channel.id}_${message.id}`)
+              .setLabel('Delete Message')
+              .setEmoji('🗑️')
+              .setStyle(ButtonStyle.Danger),
+            new ButtonBuilder()
+              .setCustomId(`btn_mod_timeout_${message.author.id}_${message.channel.id}_${message.id}`)
+              .setLabel('Timeout (1h)')
+              .setEmoji('⏳')
+              .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+              .setCustomId(`btn_mod_dismiss_${message.channel.id}_${message.id}`)
+              .setLabel('Dismiss / Safe')
+              .setEmoji('✅')
+              .setStyle(ButtonStyle.Success)
+          );
+
+          await logChan.send({ embeds: [embed], components: [row] }).catch(() => {});
+        }
+        return;
+      }
+
       const botMember = message.guild.members.me;
       if (botMember?.permissions.has(PermissionFlagsBits.ManageMessages)) {
         await message.delete().catch(() => {});

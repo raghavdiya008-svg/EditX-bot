@@ -812,6 +812,53 @@ async function runTests() {
     assert.strictEqual(passedVideo, true, 'Video attachment must pass AutoMod');
   });
 
+  // 16b. AUTOMOD REPORT-ONLY MODE
+  await test('ModerationModule - AutoMod Report-Only Mode dispatches incident card without auto-deleting', async () => {
+    const mod = new ModerationModule(mockClient, db);
+    let msgDeleted = false;
+    let dispatchedAlert = null;
+
+    db.security.set(mockGuild.id, { automod: true, reportOnly: true });
+    db.security.set(`mod_report_chan_${mockGuild.id}`, 'mod_report_chan');
+    db.config.set(mockGuild.id, { logChannelId: 'mod_report_chan' });
+
+    const mockAlertChannel = {
+      id: 'mod_report_chan',
+      type: ChannelType.GuildText,
+      name: 'mod-reports',
+      send: async (payload) => {
+        dispatchedAlert = payload;
+        return payload;
+      }
+    };
+
+    mockGuild.channels.cache.set('mod_report_chan', mockAlertChannel);
+
+    const mockInviteMsg = {
+      guild: mockGuild,
+      id: 'msg_invite_123',
+      channel: { id: 'c1' },
+      author: { id: 'bad_user_99', tag: 'BadActor#1337', username: 'BadActor' },
+      member: {
+        moderatable: true,
+        permissions: { has: () => false },
+        timeout: async () => { throw new Error('Timeout should NOT be called in Report-Only mode'); }
+      },
+      content: 'Join my awesome discord: discord.gg/malicious-server',
+      delete: async () => { msgDeleted = true; }
+    };
+
+    await mod.punish(mockInviteMsg, 'Unauthorized Discord Invite', 'DELETE');
+
+    // Clean up channel from cache so subsequent tests are not affected
+    mockGuild.channels.cache.delete('mod_report_chan');
+
+    assert.strictEqual(msgDeleted, false, 'Message must NOT be deleted in Report-Only mode');
+    assert.ok(dispatchedAlert, 'AutoMod incident report must be dispatched to log channel');
+    assert.ok(dispatchedAlert.embeds && dispatchedAlert.embeds.length > 0, 'Report must contain incident embed');
+    assert.ok(dispatchedAlert.components && dispatchedAlert.components.length > 0, 'Report must contain 1-click mod buttons');
+  });
+
   // 17. WICK BOT DECONFLICTION
   await test('Wick Deconfliction - Anti-Nuke and join-security yielded exclusively to Wick', async () => {
     const mod = new ModerationModule(mockClient, db);
