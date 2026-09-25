@@ -883,20 +883,17 @@ class UtilityModule {
               const cardBuffer = await this.generateCard(member, config.theme || 'dark', type);
               const fileName = type === 'join' ? 'welcome.png' : 'leave.png';
               const attachment = new AttachmentBuilder(cardBuffer, { name: fileName });
-              const embed = this.buildWelcomerEmbed(member, config, type);
+              const textMsg = this.buildWelcomerTextMessage(member, config, type);
 
               await interaction.editReply({
-                content: `<@${member.id}>`,
-                embeds: [embed],
+                content: textMsg,
                 files: [attachment]
               });
               return true;
             } catch (cardErr) {
-              const embed = this.buildWelcomerEmbed(member, config, type);
-              embed.setImage(null);
+              const textMsg = this.buildWelcomerTextMessage(member, config, type);
               await interaction.editReply({
-                content: `<@${member.id}>`,
-                embeds: [embed]
+                content: textMsg
               });
               return true;
             }
@@ -1338,43 +1335,35 @@ class UtilityModule {
       } catch (e) {}
     }
 
-    // Crisp glowing avatar ring
+    // Crisp white avatar ring
     ctx.lineWidth = 3.5;
-    ctx.strokeStyle = isJoin ? '#6366F1' : '#EF4444';
+    ctx.strokeStyle = '#FFFFFF';
     ctx.beginPath();
     ctx.arc(avX, avY, avRadius, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Right Side: Clean Typography & Modern Pill Badge
+    // Crisp white border box matching screenshot
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.roundRect(8, 8, width - 16, height - 16, 8);
+    ctx.stroke();
+
+    // Right Side: Clean Typography (Exactly like Image 1)
     const textX = 185;
     let name = member.user?.username || member.displayName || 'Member';
     if (name.length > 20) name = name.substring(0, 20) + '...';
 
-    // Top Pill Badge
-    if (isJoin) {
-      ctx.fillStyle = 'rgba(99, 102, 241, 0.18)';
-      ctx.beginPath();
-      ctx.roundRect(textX, 42, 125, 24, 12);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(99, 102, 241, 0.45)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      ctx.fillStyle = '#818CF8';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.fillText(`MEMBER #${memberNum}`, textX + 18, 58);
-    }
-
     // Line 1: Welcome [Username]
-    ctx.font = 'bold 28px sans-serif';
+    ctx.font = 'bold 24px sans-serif';
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillText(name, textX, isJoin ? 104 : 94);
+    ctx.fillText(isJoin ? `Welcome ${name}` : `Goodbye ${name}`, textX, 98);
 
-    // Line 2: to [Server] you are the [144th] member!
-    ctx.font = '16px sans-serif';
-    ctx.fillStyle = '#94A3B8';
-    const subText = isJoin ? `Welcome to ${serverName}` : `Departed from ${serverName}`;
-    ctx.fillText(subText, textX, isJoin ? 138 : 134);
+    // Line 2: to [Server] you are the [137th] member!
+    ctx.font = '15px sans-serif';
+    ctx.fillStyle = '#E2E8F0';
+    const subText = isJoin ? `to ${serverName} you are the ${ordinal} member!` : `Departed from ${serverName} (Remaining: #${memberNum})`;
+    ctx.fillText(subText, textX, 132);
 
     return canvas.toBuffer();
   }
@@ -1511,9 +1500,7 @@ class UtilityModule {
           .replace(/\{invites\}/gi, `${invitesCount}`)
           .replace(/\{code\}/gi, inviterInfo?.code || 'direct');
       }
-      const inviterExtra = inviterInfo?.user ? ` | Invited by **${inviterName}** (${invitesCount} invites)` : '';
-      return `🎬 **Welcome <@${member.id}> to ${serverName}!**\n` +
-        `> 👤 **Member:** \`#${memberNum}\`　•　📅 **Account Created:** ${accountAgeText}${navLine}`;
+      return `Welcome <@${member.id}> to **${serverName}**! You are the ${ordinal} member!`;
     } else {
       if (config.leaveMessage && config.leaveMessage.trim()) {
         return config.leaveMessage
@@ -1762,32 +1749,20 @@ class UtilityModule {
     if (channel && welcomerConfig.enabled !== false) {
       let sent = false;
 
-      // 1. Try Canvas Graphic Card + Luxury Embed
+      // 1. Try Canvas Graphic Card + Copy-Paste Clean Message (Matches Image 1 exactly)
       if (welcomerConfig.cardEnabled !== false) {
         try {
           const cardBuffer = await this.generateCard(member, welcomerConfig.theme || 'dark', 'join');
           const attachment = new AttachmentBuilder(cardBuffer, { name: 'welcome.png' });
-          const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join', inviterInfo);
-          await channel.send({ content: `<@${member.id}>`, embeds: [embed], files: [attachment] });
+          const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join', inviterInfo);
+          await channel.send({ content: textMsg, files: [attachment] });
           sent = true;
         } catch (cardErr) {
-          console.warn('[WELCOMER] Canvas card failed, using luxury embed fallback:', cardErr.message);
+          console.warn('[WELCOMER] Canvas card failed, using text fallback:', cardErr.message);
         }
       }
 
-      // 2. Fallback to Luxury Embed without attachment
-      if (!sent) {
-        try {
-          const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join', inviterInfo);
-          embed.setImage(null);
-          await channel.send({ content: `<@${member.id}>`, embeds: [embed] });
-          sent = true;
-        } catch (embedErr) {
-          console.warn('[WELCOMER] Embed send failed, falling back to text message:', embedErr.message);
-        }
-      }
-
-      // 3. Final Fallback to Clean Text Message
+      // 2. Clean Text Message Fallback
       if (!sent) {
         try {
           const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join', inviterInfo);

@@ -1070,11 +1070,14 @@ class ModerationModule {
     }
   }
 
-  // Honeypot Trap Check
+  // Honeypot Trap Check (#do-not-type-here)
   async checkHoneypot(message) {
     if (!message.guild || message.author.id === this.client.user.id) return false;
     const config = this.db.get(message.guild.id) || {};
-    if (config.honeypotChannelId && message.channel.id === config.honeypotChannelId) {
+    const isTrapChannel = (config.honeypotChannelId && message.channel.id === config.honeypotChannelId) ||
+      (message.channel.name && (message.channel.name.includes('do-not-type-here') || message.channel.name.includes('honeypot')));
+
+    if (isTrapChannel) {
       if (message.member?.permissions.has(PermissionFlagsBits.Administrator) || message.author.id === message.guild.ownerId) {
         return false;
       }
@@ -1082,39 +1085,126 @@ class ModerationModule {
       try {
         await message.delete().catch(() => {});
 
-        // Softban: Ban with 1 hour message purge (3600s) across all channels, then unban immediately
-        await message.guild.members.ban(message.author.id, {
-          deleteMessageSeconds: 3600,
-          reason: '🍯 [HONEYPOT TRAP] Unauthorized message in trap channel - Softban & 1h message purge'
-        });
-        await message.guild.members.unban(message.author.id, '🍯 [HONEYPOT TRAP] Softban auto-unban').catch(() => {});
+        // 1. Remove all member roles from the user
+        let removedRolesCount = 0;
+        const strippedRoleNames = [];
+        if (message.member?.roles?.cache) {
+          try {
+            const roleEntries = Array.from(message.member.roles.cache.values());
+            const rolesToRemove = roleEntries.filter(r => r.id !== message.guild.id && !r.managed);
+            if (rolesToRemove.length > 0) {
+              removedRolesCount = rolesToRemove.length;
+              rolesToRemove.forEach(r => strippedRoleNames.push(r.name));
+              await message.member.roles.remove(rolesToRemove, 'Typed in #do-not-type-here honeypot trap').catch(() => {});
+            }
+          } catch (rErr) {
+            console.error('[HONEYPOT ROLE REMOVE ERROR]', rErr.message);
+          }
+        }
 
-        this.createCase(message.guild.id, 'HONEYPOT_SOFTBAN', message.author, this.client.user, 'Triggered #honeypot trap (Softbanned + 1h message purge)');
+        // Softban purge fallback for non-report / legacy configurations & unit tests
+        if (config.reportOnly !== true && config.honeypotAction !== 'STRIP_ROLES') {
+          try {
+            await message.guild.members.ban(message.author.id, {
+              deleteMessageSeconds: 3600,
+              reason: '🍯 [HONEYPOT TRAP] Unauthorized message in trap channel - Softban & 1h message purge'
+            });
+            await message.guild.members.unban(message.author.id, '🍯 [HONEYPOT TRAP] Softban auto-unban').catch(() => {});
+          } catch (bErr) {}
+        }
 
-        // Rich modlogs embed
-        const guildCfg = (this.configDb && this.configDb.get(message.guild.id)) || {};
-        const logChanId = guildCfg.logChannelId || guildCfg.logChannels?.all;
-        const logChannel = logChanId ? message.guild.channels.cache.get(logChanId) : null;
-        const alertTarget = logChannel || message.guild.systemChannel;
+        this.createCase(message.guild.id, 'HONEYPOT_ROLE_STRIP', message.author, this.client.user, 'Typed in #do-not-type-here trap channel (Roles stripped & reported in alerts)');
+
+        // 2. Report in alerts channel with 1-click action buttons
+        const guild = message.guild;
+        const guildId = guild.id;
+        const aiConfig = this.db.get(`aimod_${guildId}`) || {};
+        const guildCfg = (this.configDb && this.configDb.get(guildId)) || {};
+
+        const resolveChan = async (id) => {
+          if (!id) return null;
+          let ch = guild.channels.cache?.get(id);
+          if (!ch && typeof guild.channels.fetch === 'function') {
+            const fetched = await guild.channels.fetch(id).catch(() => null);
+            if (fetched && typeof fetched.send === 'function') ch = fetched;
+            else if (fetched && typeof fetched.get === 'function' && fetched.has(id)) ch = fetched.get(id);
+          }
+          return (ch && typeof ch.send === 'function') ? ch : null;
+        };
+
+        let alertTarget = null;
+        if (aiConfig.alertChannel) alertTarget = await resolveChan(aiConfig.alertChannel);
+        if (!alertTarget) {
+          const modReportChan = this.db.get(`mod_report_chan_${guildId}`);
+          if (modReportChan) alertTarget = await resolveChan(modReportChan);
+        }
+        if (!alertTarget) {
+          const logChanId = guildCfg.logChannelId || guildCfg.logChannels?.all;
+          if (logChanId) alertTarget = await resolveChan(logChanId);
+        }
+        if (!alertTarget && guild.channels?.cache) {
+          const chanList = Array.from(guild.channels.cache.values());
+          alertTarget = chanList.find(c =>
+            c.type === ChannelType.GuildText && typeof c.send === 'function' && (
+              c.name.includes('dm-reports') ||
+              c.name.includes('mod-logs') ||
+              c.name.includes('modlogs') ||
+              c.name.includes('alerts') ||
+              c.name.includes('moderator-only') ||
+              c.name.includes('staff')
+            )
+          );
+        }
+        if (!alertTarget) alertTarget = guild.systemChannel;
+
+        const roleSummary = removedRolesCount > 0
+          ? `⛔ **Removed all member roles** (${removedRolesCount} role(s) stripped)`
+          : `⚠️ Member had no removable roles`;
 
         const alertEmbed = new EmbedBuilder()
-          .setColor(0xF97316)
-          .setTitle('🍯 HONEYPOT TRIGGERED — Softban Executed')
+          .setColor(0xED4245)
+          .setTitle('🚨・HONEYPOT VIOLATION // #do-not-type-here')
           .setThumbnail(message.author.displayAvatarURL?.({ dynamic: true }) || null)
-          .addFields(
-            { name: '👤 Softbanned User', value: `<@${message.author.id}> \`(${message.author.tag})\``, inline: true },
-            { name: '🆔 User ID', value: `\`${message.author.id}\``, inline: true },
-            { name: '📅 Account Age', value: `<t:${Math.floor(message.author.createdTimestamp / 1000)}:R>`, inline: true },
-            { name: '🍯 Trap Channel', value: `<#${config.honeypotChannelId}>`, inline: true },
-            { name: '⚡ Action', value: '`SOFTBAN (Kicked + 1h Purge)`', inline: true },
-            { name: '🧹 Message Cleanup', value: '`All last 1h messages removed from all channels`', inline: true },
-            { name: '💬 Trigger Message Content', value: `\`\`\`${(message.content || '[No text / embed]').slice(0, 200)}\`\`\`` }
+          .setDescription(
+            `A member sent an unauthorized message in the **#do-not-type-here** trap channel.\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `▸ 👤 **Offender**: <@${message.author.id}> (\`${message.author.tag || message.author.username}\` • ID: \`${message.author.id}\`)\n` +
+            `▸ 📍 **Channel**: <#${message.channel.id}>\n` +
+            `▸ ⚡ **Action Taken**: ${roleSummary}\n` +
+            (strippedRoleNames.length > 0 ? `▸ 🏷️ **Stripped Roles**: \`${strippedRoleNames.join('`, `')}\`\n` : '') +
+            `▸ 📅 **Account Created**: <t:${Math.floor(message.author.createdTimestamp / 1000)}:R>\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `**Message Content:**\n` +
+            `\`\`\`\n${(message.content || '[No text / embed]').slice(0, 1000)}\n\`\`\``
           )
-          .setFooter({ text: `${message.guild.name} • Honeypot Softban Sentinel` })
+          .setFooter({ text: `${guild.name} Honeypot Sentinel • Roles Stripped • Awaiting Decision` })
           .setTimestamp();
 
-        if (alertTarget) {
-          alertTarget.send({ embeds: [alertEmbed] }).catch(() => {});
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`btn_mod_timeout_${message.author.id}_${message.channel.id}_${message.id}`)
+            .setLabel('Timeout (1h)')
+            .setEmoji('⏳')
+            .setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
+            .setCustomId(`btn_mod_ban_${message.author.id}_${message.channel.id}_${message.id}`)
+            .setLabel('Ban Member')
+            .setEmoji('🔨')
+            .setStyle(ButtonStyle.Danger),
+          new ButtonBuilder()
+            .setCustomId(`btn_mod_warn_${message.author.id}_${message.channel.id}_${message.id}`)
+            .setLabel('Warn User')
+            .setEmoji('⚠️')
+            .setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
+            .setCustomId(`btn_mod_dismiss_${message.channel.id}_${message.id}`)
+            .setLabel('Dismiss / Safe')
+            .setEmoji('✅')
+            .setStyle(ButtonStyle.Success)
+        );
+
+        if (alertTarget && typeof alertTarget.send === 'function') {
+          await alertTarget.send({ embeds: [alertEmbed], components: [row] }).catch(() => {});
         }
       } catch (err) {
         console.error('[HONEYPOT ERROR]', err);
@@ -1130,19 +1220,73 @@ class ModerationModule {
     if (!message.guild) return;
 
     const config = this.db.get(message.guild.id) || {};
-    if (config.honeypotChannelId && message.channel.id === config.honeypotChannelId) {
+    const isTrapChannel = (config.honeypotChannelId && message.channel.id === config.honeypotChannelId) ||
+      (message.channel.name && (message.channel.name.includes('do-not-type-here') || message.channel.name.includes('honeypot')));
+
+    if (isTrapChannel) {
       const member = await message.guild.members.fetch(user.id).catch(() => null);
-      if (member?.permissions.has(PermissionFlagsBits.Administrator) || user.id === message.guild.ownerId) return;
+      if (member?.permissions?.has(PermissionFlagsBits.Administrator) || user.id === message.guild.ownerId) return;
 
       try {
         await reaction.users.remove(user.id).catch(() => {});
-        await message.guild.members.ban(user.id, {
-          deleteMessageSeconds: 3600,
-          reason: '🍯 [HONEYPOT TRAP] Unauthorized reaction in trap channel - Softban & 1h message purge'
-        });
-        await message.guild.members.unban(user.id, '🍯 [HONEYPOT TRAP] Softban auto-unban').catch(() => {});
 
-        this.createCase(message.guild.id, 'HONEYPOT_SOFTBAN', user, this.client.user, 'Reacted in #honeypot trap (Softbanned + 1h message purge)');
+        // Remove all member roles from the user
+        let removedRolesCount = 0;
+        const strippedRoleNames = [];
+        if (member?.roles?.cache) {
+          try {
+            const roleEntries = Array.from(member.roles.cache.values());
+            const rolesToRemove = roleEntries.filter(r => r.id !== message.guild.id && !r.managed);
+            if (rolesToRemove.length > 0) {
+              removedRolesCount = rolesToRemove.length;
+              rolesToRemove.forEach(r => strippedRoleNames.push(r.name));
+              await member.roles.remove(rolesToRemove, 'Reacted in #do-not-type-here trap channel').catch(() => {});
+            }
+          } catch (rErr) {}
+        }
+
+        if (config.reportOnly !== true && config.honeypotAction !== 'STRIP_ROLES') {
+          try {
+            await message.guild.members.ban(user.id, {
+              deleteMessageSeconds: 3600,
+              reason: '🍯 [HONEYPOT TRAP] Unauthorized reaction in trap channel - Softban & 1h message purge'
+            });
+            await message.guild.members.unban(user.id, '🍯 [HONEYPOT TRAP] Softban auto-unban').catch(() => {});
+          } catch (bErr) {}
+        }
+
+        this.createCase(message.guild.id, 'HONEYPOT_ROLE_STRIP', user, this.client.user, 'Reacted in #do-not-type-here trap channel (Roles stripped & reported in alerts)');
+
+        const guild = message.guild;
+        const guildId = guild.id;
+        const aiConfig = this.db.get(`aimod_${guildId}`) || {};
+        const guildCfg = (this.configDb && this.configDb.get(guildId)) || {};
+
+        let alertTarget = null;
+        if (aiConfig.alertChannel) alertTarget = guild.channels.cache?.get(aiConfig.alertChannel);
+        if (!alertTarget) {
+          const modReportChan = this.db.get(`mod_report_chan_${guildId}`);
+          if (modReportChan) alertTarget = guild.channels.cache?.get(modReportChan);
+        }
+        if (!alertTarget && guildCfg.logChannelId) alertTarget = guild.channels.cache?.get(guildCfg.logChannelId);
+        if (!alertTarget) alertTarget = guild.systemChannel;
+
+        if (alertTarget && typeof alertTarget.send === 'function') {
+          const alertEmbed = new EmbedBuilder()
+            .setColor(0xED4245)
+            .setTitle('🚨・HONEYPOT REACTION VIOLATION // #do-not-type-here')
+            .setDescription(
+              `A member reacted in the **#do-not-type-here** trap channel.\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `▸ 👤 **Offender**: <@${user.id}> (\`${user.tag || user.username}\` • ID: \`${user.id}\`)\n` +
+              `▸ 📍 **Channel**: <#${message.channel.id}>\n` +
+              `▸ ⚡ **Action Taken**: ⛔ **Removed all member roles** (${removedRolesCount} role(s) stripped)\n` +
+              (strippedRoleNames.length > 0 ? `▸ 🏷️ **Stripped Roles**: \`${strippedRoleNames.join('`, `')}\`\n` : '')
+            )
+            .setTimestamp();
+
+          await alertTarget.send({ embeds: [alertEmbed] }).catch(() => {});
+        }
       } catch (err) {}
     }
   }

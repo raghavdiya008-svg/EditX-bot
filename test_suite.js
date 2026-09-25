@@ -267,6 +267,61 @@ async function runTests() {
     assert.strictEqual(lastBanOpts?.deleteMessageSeconds, 3600, 'Softban must purge exactly 1 hour (3600s) of messages across channels');
   });
 
+  // 3b. HONEYPOT ROLE STRIP & ALERTS DISPATCH
+  await test('ModerationModule - Honeypot in #do-not-type-here strips roles & reports in alerts', async () => {
+    const mod = new ModerationModule(mockClient, db);
+    let alertSent = null;
+    let rolesRemoved = null;
+    let messageDeleted = false;
+
+    db.security.set(mockGuild.id, { honeypotChannelId: 'do_not_type_1', reportOnly: true });
+    db.security.set(`mod_report_chan_${mockGuild.id}`, 'alerts_chan_1');
+
+    const mockAlertChan = {
+      id: 'alerts_chan_1',
+      name: 'mod-logs',
+      type: ChannelType.GuildText,
+      send: async (p) => { alertSent = p; return p; }
+    };
+    mockGuild.channels.cache.set('alerts_chan_1', mockAlertChan);
+
+    const testMember = {
+      permissions: { has: () => false },
+      roles: {
+        cache: new Map([
+          ['guild_123', { id: 'guild_123', name: '@everyone' }],
+          ['role_member', { id: 'role_member', name: 'Member', managed: false }],
+          ['role_editor', { id: 'role_editor', name: 'Editor', managed: false }]
+        ]),
+        remove: async (roles) => {
+          rolesRemoved = roles;
+        }
+      }
+    };
+
+    const mockTrapMsg = {
+      guild: mockGuild,
+      id: 'trap_msg_99',
+      channel: { id: 'do_not_type_1', name: 'do-not-type-here' },
+      author: { id: 'intruder_1', tag: 'Intruder#9999', bot: false, createdTimestamp: Date.now() - 500000 },
+      member: testMember,
+      content: 'hello can anyone hear me?',
+      delete: async () => { messageDeleted = true; }
+    };
+
+    const res = await mod.checkHoneypot(mockTrapMsg);
+    // Cleanup cache
+    mockGuild.channels.cache.delete('alerts_chan_1');
+
+    assert.strictEqual(res, true, 'Honeypot trap must handle message');
+    assert.strictEqual(messageDeleted, true, 'Message in trap channel must be deleted');
+    assert.ok(rolesRemoved, 'Member roles must be removed');
+    assert.strictEqual(rolesRemoved.length, 2, 'All non-everyone roles must be stripped');
+    assert.ok(alertSent, 'Alert report must be dispatched to alerts channel');
+    assert.ok(alertSent.embeds[0].data.title.includes('HONEYPOT VIOLATION'));
+    assert.ok(alertSent.components && alertSent.components.length > 0, 'Must include 1-click mod action buttons');
+  });
+
   await test('ModerationModule - Join Raid & Bot Gate Deconfliction (Yielded to Wick Bot)', async () => {
     const mod = new ModerationModule(mockClient, db);
     globalBannedIds = [];
