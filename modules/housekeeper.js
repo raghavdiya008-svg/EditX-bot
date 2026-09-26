@@ -324,8 +324,13 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
     if (interaction.commandName !== 'copilot') return false;
 
     // Hardcoded Permission Security Validation
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) &&
-        !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    const BOT_OWNER_ID = '1320083615475830797';
+    const isStaff = interaction.user.id === BOT_OWNER_ID ||
+                    interaction.user.id === interaction.guild?.ownerId ||
+                    Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) ||
+                    Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
+
+    if (!isStaff) {
       return interaction.reply({ content: '❌ Access Denied: Only server staff can use `/copilot`.', ephemeral: true });
     }
 

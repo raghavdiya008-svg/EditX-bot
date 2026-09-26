@@ -37,9 +37,13 @@ class QuickSetupModule {
 
   async handleCommand(interaction) {
     const { guild, channel } = interaction;
+    const BOT_OWNER_ID = '1320083615475830797';
+    const isAuthorized = interaction.user?.id === BOT_OWNER_ID ||
+                         interaction.user?.id === guild?.ownerId ||
+                         Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
 
     if (interaction.commandName === 'autopilot') {
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+      if (!isAuthorized) {
         return interaction.reply({ content: '❌ Administrator permission is required to run Auto-Pilot.', ephemeral: true });
       }
 
@@ -74,7 +78,7 @@ class QuickSetupModule {
 
     const sub = interaction.options.getSubcommand();
 
-    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    if (!isAuthorized) {
       return interaction.reply({ content: '❌ Administrator permission is required to configure server systems.', ephemeral: true });
     }
 
@@ -507,167 +511,9 @@ class QuickSetupModule {
     // 4. 1-CLICK REACTION ROLES DEPLOYMENT (Carl-bot Replacement)
     if (sub === 'roles') {
       await interaction.deferReply();
-
-      const existingChannels = guild.channels.fetch ? await guild.channels.fetch().catch(() => guild.channels.cache) : guild.channels.cache;
-      const chanList = existingChannels?.values ? Array.from(existingChannels.values()).filter(Boolean) : (guild.channels.cache ? Array.from(guild.channels.cache.values()).filter(Boolean) : []);
-
-      const targetChan = interaction.options.getChannel('channel') ||
-        chanList.find(c => c.type === ChannelType.GuildText && (c.name.includes('role') || c.name.includes('roles'))) ||
-        channel;
-
-      const findRole = (id, ...names) => {
-        if (guild.roles.cache?.has && guild.roles.cache.has(id)) return guild.roles.cache.get(id);
-        const rolesList = guild.roles.cache?.values ? Array.from(guild.roles.cache.values()) : [];
-        return rolesList.find(r => names.some(n => r.name.toLowerCase().includes(n.toLowerCase())));
-      };
-
-      // --- PANEL 1: CREATIVE PROFESSIONS ---
-      const videoEditor = findRole('1538964382157906071', 'video editor');
-      const photoEditor = findRole('1538964384158851243', 'photo editor');
-      const graphicDesigner = findRole('1538964386335690772', 'graphic designer');
-      const animator = findRole('1538964388059553942', 'animator');
-      const motionDesigner = findRole('1538964389921816627', 'motion designer');
-      const clientRole = findRole('1538964392337612931', 'client');
-
-      const profEmbed = new EmbedBuilder()
-        .setColor(0x9B59B6)
-        .setTitle('🎨・CREATIVE DISCIPLINES & PROFESSIONS')
-        .setDescription(
-          `Select your primary creative disciplines to display your specialty on your server profile, appear in creator directories, and receive commission inquiries:\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `🎬 **Video Editor** ➔ ${videoEditor ? `<@&${videoEditor.id}>` : '`@Video Editor`'}\n` +
-          `📸 **Photo Editor** ➔ ${photoEditor ? `<@&${photoEditor.id}>` : '`@Photo Editor`'}\n` +
-          `🎨 **Graphic Designer** ➔ ${graphicDesigner ? `<@&${graphicDesigner.id}>` : '`@Graphic Designer`'}\n` +
-          `💫 **Animator** ➔ ${animator ? `<@&${animator.id}>` : '`@Animator`'}\n` +
-          `✨ **Motion Designer** ➔ ${motionDesigner ? `<@&${motionDesigner.id}>` : '`@Motion Designer`'}\n` +
-          `💼 **Client / Hiring** ➔ ${clientRole ? `<@&${clientRole.id}>` : '`@Client`'}\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-          `👉 *Click any button below to instantly toggle the role on or off your profile.*`
-        )
-        .setFooter({ text: `${guild.name} • Creative Directory` });
-
-      const profRow1 = new ActionRowBuilder();
-      if (videoEditor) profRow1.addComponents(new ButtonBuilder().setCustomId(`btn_role_${videoEditor.id}`).setLabel('Video Editor').setEmoji('🎬').setStyle(ButtonStyle.Primary));
-      if (photoEditor) profRow1.addComponents(new ButtonBuilder().setCustomId(`btn_role_${photoEditor.id}`).setLabel('Photo Editor').setEmoji('📸').setStyle(ButtonStyle.Primary));
-      if (graphicDesigner) profRow1.addComponents(new ButtonBuilder().setCustomId(`btn_role_${graphicDesigner.id}`).setLabel('Graphic Designer').setEmoji('🎨').setStyle(ButtonStyle.Primary));
-
-      const profRow2 = new ActionRowBuilder();
-      if (animator) profRow2.addComponents(new ButtonBuilder().setCustomId(`btn_role_${animator.id}`).setLabel('Animator').setEmoji('💫').setStyle(ButtonStyle.Primary));
-      if (motionDesigner) profRow2.addComponents(new ButtonBuilder().setCustomId(`btn_role_${motionDesigner.id}`).setLabel('Motion Designer').setEmoji('✨').setStyle(ButtonStyle.Primary));
-      if (clientRole) profRow2.addComponents(new ButtonBuilder().setCustomId(`btn_role_${clientRole.id}`).setLabel('Client').setEmoji('💼').setStyle(ButtonStyle.Secondary));
-
-      const profComponents = [];
-      if (profRow1.components.length > 0) profComponents.push(profRow1);
-      if (profRow2.components.length > 0) profComponents.push(profRow2);
-
-      await targetChan.send({ embeds: [profEmbed], components: profComponents });
-
-      // --- PANEL 2: SOFTWARE & TOOLS (Dropdown Select Menu) ---
-      const softwareList = [
-        { id: '1538964396095840466', name: 'After Effects', emoji: '⚡', desc: 'Adobe After Effects motion & VFX' },
-        { id: '1538964399753011321', name: 'Premiere Pro', emoji: '🎞️', desc: 'Adobe Premiere Pro video editing' },
-        { id: '1538964401732853871', name: 'Davinci Resolve', emoji: '🎛️', desc: 'DaVinci Resolve editing & color grading' },
-        { id: '1538964403649511477', name: 'CapCut', emoji: '📱', desc: 'CapCut desktop & mobile editing' },
-        { id: '1538964405507596378', name: 'Sony Vegas', emoji: '✂️', desc: 'VEGAS Pro video production' },
-        { id: '1538964407206547559', name: 'Alight Motion', emoji: '✨', desc: 'Alight Motion mobile motion design' },
-        { id: '1538964409043521766', name: 'Photoshop', emoji: '🖌️', desc: 'Adobe Photoshop raster editing' },
-        { id: '1538964410570383401', name: 'Lightroom', emoji: '📷', desc: 'Adobe Lightroom photo grading' },
-        { id: '1538964413615313067', name: 'Canva', emoji: '🎨', desc: 'Canva design & graphics' },
-        { id: '1538964415854944376', name: 'Gimp', emoji: '🖌️', desc: 'GIMP open-source manipulation' }
-      ];
-
-      const validSoftware = [];
-      softwareList.forEach(sw => {
-        const r = findRole(sw.id, sw.name);
-        if (r) validSoftware.push({ role: r, emoji: sw.emoji, desc: sw.desc });
-      });
-
-      const softEmbed = new EmbedBuilder()
-        .setColor(0x3498DB)
-        .setTitle('⚡・CREATIVE SOFTWARE & TOOLS')
-        .setDescription(
-          `Select your editing and design software suite to let collaborators and clients know which toolsets you use:\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `⚡ **After Effects** • 🎞️ **Premiere Pro** • 🎛️ **DaVinci Resolve**\n` +
-          `📱 **CapCut** • ✂️ **Sony Vegas** • ✨ **Alight Motion**\n` +
-          `🖌️ **Photoshop** • 📷 **Lightroom** • 🎨 **Canva** • 🖌️ **Gimp**\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-          `👉 *Select one or more software options from the dropdown menu below to add or remove them.*`
-        )
-        .setFooter({ text: `${guild.name} • Software Stack` });
-
-      if (validSoftware.length > 0) {
-        const selectMenu = new ActionRowBuilder().addComponents(
-          new StringSelectMenuBuilder()
-            .setCustomId('menu_rr_select')
-            .setPlaceholder('Select your creative software...')
-            .setMinValues(1)
-            .setMaxValues(Math.min(validSoftware.length, 10))
-            .addOptions(validSoftware.map(sw => ({
-              label: sw.role.name.replace(/[^\w\s]/gi, '').trim() || sw.role.name,
-              value: sw.role.id,
-              description: sw.desc,
-              emoji: sw.emoji
-            })))
-        );
-        await targetChan.send({ embeds: [softEmbed], components: [selectMenu] });
-      }
-
-      // --- PANEL 3: NOTIFICATION PINGS ---
-      const pingsList = [
-        { id: '1538964417717469277', name: 'Announcements', emoji: '📢', label: 'Announcements', desc: 'Server news & updates' },
-        { id: '1538964419718029474', name: 'Giveaways', emoji: '🎉', label: 'Giveaways', desc: 'Free assets, plugins & perks' },
-        { id: '1538964421844668467', name: 'Resources', emoji: '📦', label: 'New Resources', desc: 'Packs, presets & overlays' },
-        { id: '1538964423887294525', name: 'Dead Chat', emoji: '💬', label: 'Dead Chat', desc: 'Chat revival pings & discussions' },
-        { id: '1538964425438924844', name: 'Edit of the Week', emoji: '🏆', label: 'Edit of the Week', desc: 'Weekly editing competition alerts' },
-        { id: '1538964427246665860', name: 'Editing Help', emoji: '💡', label: 'Editing Help', desc: 'Questions & critique pings' }
-      ];
-
-      const validPings = [];
-      pingsList.forEach(p => {
-        const r = findRole(p.id, p.name);
-        if (r) validPings.push({ role: r, emoji: p.emoji, label: p.label });
-      });
-
-      const pingEmbed = new EmbedBuilder()
-        .setColor(0xF1C40F)
-        .setTitle('🔔・SERVER NOTIFICATION PREFERENCES')
-        .setDescription(
-          `Customize your community notifications and alert preferences:\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `📢 **Announcements** ➔ Server news and major updates\n` +
-          `🎉 **Giveaways** ➔ Free assets, software licenses and perks\n` +
-          `📦 **New Resources** ➔ Editing packs, presets, overlays & fonts\n` +
-          `💬 **Dead Chat** ➔ Community revival pings & conversations\n` +
-          `🏆 **Edit of the Week** ➔ Weekly editing showcases and polls\n` +
-          `💡 **Editing Help** ➔ Questions, critiques and troubleshooting\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-          `👉 *Click any button below to toggle that notification ping.*`
-        )
-        .setFooter({ text: `${guild.name} • Alert Preferences` });
-
-      const pingRow1 = new ActionRowBuilder();
-      const pingRow2 = new ActionRowBuilder();
-      validPings.forEach((p, idx) => {
-        const btn = new ButtonBuilder()
-          .setCustomId(`btn_role_${p.role.id}`)
-          .setLabel(p.label)
-          .setEmoji(p.emoji)
-          .setStyle(ButtonStyle.Secondary);
-
-        if (idx < 3) pingRow1.addComponents(btn);
-        else pingRow2.addComponents(btn);
-      });
-
-      const pingComponents = [];
-      if (pingRow1.components.length > 0) pingComponents.push(pingRow1);
-      if (pingRow2.components.length > 0) pingComponents.push(pingRow2);
-
-      await targetChan.send({ embeds: [pingEmbed], components: pingComponents });
-
-      return interaction.editReply({
-        content: `✅ **Reaction Role Panels Deployed!**\n3 high-gloss interactive role panels (Creative Disciplines, Software Stack, and Notification Pings) have been posted to <#${targetChan.id}>. Members can now self-assign roles via modern buttons and dropdown menus with zero Carl-bot dependencies.`
-      });
+      const targetChan = interaction.options?.getChannel?.('channel');
+      const responseText = await this.deployReactionRoles(guild, targetChan);
+      return interaction.editReply({ content: responseText });
     }
 
     // 5. HONEYPOT DIRECT CONFIGURATION
@@ -906,6 +752,244 @@ class QuickSetupModule {
     results.serverScan = `🟢 Synchronized (Full channel architecture & community guidelines)`;
 
     return results;
+  }
+
+  async createDefaultRoles(guild) {
+    if (!guild?.roles) return [];
+    const rolesToCreate = [
+      { name: '🛡️ Administrator', color: 0xE74C3C, hoist: true, permissions: [PermissionFlagsBits.Administrator] },
+      { name: '⚔️ Moderator', color: 0x3498DB, hoist: true, permissions: [PermissionFlagsBits.ManageMessages, PermissionFlagsBits.KickMembers, PermissionFlagsBits.ModerateMembers] },
+      { name: '💎 VIP / Supporter', color: 0xF1C40F, hoist: true },
+      { name: '🎬 Video Editor', color: 0x9B59B6, hoist: true },
+      { name: '📸 Photo Editor', color: 0x1ABC9C, hoist: true },
+      { name: '🎨 Graphic Designer', color: 0xE67E22, hoist: true },
+      { name: '✨ Motion Designer', color: 0xE91E63, hoist: true },
+      { name: '💫 Animator', color: 0x9B59B6, hoist: true },
+      { name: '💼 Client', color: 0x34495E, hoist: true },
+      { name: '⚡ After Effects', color: 0x34495E },
+      { name: '🎞️ Premiere Pro', color: 0x2C3E50 },
+      { name: '🎛️ DaVinci Resolve', color: 0x7F8C8D },
+      { name: '📱 CapCut', color: 0x16A085 },
+      { name: '👥 Member', color: 0x95A5A6 },
+      { name: '📢 Announcements', color: 0x99AAB5 },
+      { name: '🎉 Giveaways', color: 0x99AAB5 },
+      { name: '📦 Resources', color: 0x99AAB5 },
+      { name: '💬 Dead Chat', color: 0x99AAB5 }
+    ];
+
+    const created = [];
+    const existing = guild.roles.cache ? Array.from(guild.roles.cache.values()) : [];
+
+    for (const rDef of rolesToCreate) {
+      const cleanName = rDef.name.replace(/[^\w\s]/g, '').trim().toLowerCase();
+      let found = existing.find(r => {
+        const existingClean = (r.name || '').replace(/[^\w\s]/g, '').trim().toLowerCase();
+        return existingClean === cleanName || existingClean.includes(cleanName) || cleanName.includes(existingClean);
+      });
+
+      if (!found && guild.roles.create) {
+        try {
+          found = await guild.roles.create({
+            name: rDef.name,
+            color: rDef.color,
+            hoist: rDef.hoist || false,
+            permissions: rDef.permissions || undefined,
+            reason: 'EditX Autonomous Server Initialization'
+          });
+          if (found) existing.push(found);
+        } catch (e) {
+          console.warn(`[ROLES INIT] Could not create role ${rDef.name}:`, e.message);
+        }
+      }
+
+      if (found) {
+        created.push(found);
+        if (cleanName === 'member' || cleanName.includes('member')) {
+          const cfgDb = this.db.config;
+          const cfg = cfgDb?.get ? (cfgDb.get(guild.id) || {}) : {};
+          if (!cfg.autoRoleId) {
+            cfg.autoRoleId = found.id;
+            if (cfgDb?.set) cfgDb.set(guild.id, cfg);
+          }
+        }
+      }
+    }
+    return created;
+  }
+
+  async deployReactionRoles(guild, targetChan = null) {
+    if (!guild) return '❌ Guild not found.';
+
+    // 1. Ensure target channel exists
+    if (!targetChan) {
+      const existingChannels = guild.channels.fetch ? await guild.channels.fetch().catch(() => guild.channels.cache) : guild.channels.cache;
+      const chanList = existingChannels?.values ? Array.from(existingChannels.values()).filter(Boolean) : (guild.channels.cache ? Array.from(guild.channels.cache.values()).filter(Boolean) : []);
+      targetChan = chanList.find(c => c && (c.type === ChannelType.GuildText || c.type === 0) && (c.name.includes('role') || c.name.includes('roles')));
+      if (!targetChan && guild.channels?.create) {
+        targetChan = await guild.channels.create({
+          name: '🎭・roles',
+          type: ChannelType.GuildText,
+          topic: 'Self-assignable community roles, software stack, and notification pings'
+        }).catch(() => null);
+      }
+    }
+
+    if (!targetChan) return '❌ Could not find or create a #roles channel.';
+
+    // 2. Ensure default roles exist if server is bare
+    await this.createDefaultRoles(guild);
+
+    const findRole = (id, ...names) => {
+      if (guild.roles.cache?.has && guild.roles.cache.has(id)) return guild.roles.cache.get(id);
+      const rolesList = guild.roles.cache?.values ? Array.from(guild.roles.cache.values()) : [];
+      return rolesList.find(r => names.some(n => (r.name || '').toLowerCase().includes(n.toLowerCase())));
+    };
+
+    // --- PANEL 1: CREATIVE PROFESSIONS ---
+    const videoEditor = findRole('1538964382157906071', 'video editor');
+    const photoEditor = findRole('1538964384158851243', 'photo editor');
+    const graphicDesigner = findRole('1538964386335690772', 'graphic designer');
+    const animator = findRole('1538964388059553942', 'animator');
+    const motionDesigner = findRole('1538964389921816627', 'motion designer');
+    const clientRole = findRole('1538964392337612931', 'client');
+
+    const profEmbed = new EmbedBuilder()
+      .setColor(0x9B59B6)
+      .setTitle('🎨・CREATIVE DISCIPLINES & PROFESSIONS')
+      .setDescription(
+        `Select your primary creative disciplines to display your specialty on your server profile, appear in creator directories, and receive commission inquiries:\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🎬 **Video Editor** ➔ ${videoEditor ? `<@&${videoEditor.id}>` : '`@Video Editor`'}\n` +
+        `📸 **Photo Editor** ➔ ${photoEditor ? `<@&${photoEditor.id}>` : '`@Photo Editor`'}\n` +
+        `🎨 **Graphic Designer** ➔ ${graphicDesigner ? `<@&${graphicDesigner.id}>` : '`@Graphic Designer`'}\n` +
+        `💫 **Animator** ➔ ${animator ? `<@&${animator.id}>` : '`@Animator`'}\n` +
+        `✨ **Motion Designer** ➔ ${motionDesigner ? `<@&${motionDesigner.id}>` : '`@Motion Designer`'}\n` +
+        `💼 **Client / Hiring** ➔ ${clientRole ? `<@&${clientRole.id}>` : '`@Client`'}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `👉 *Click any button below to instantly toggle the role on or off your profile.*`
+      )
+      .setFooter({ text: `${guild.name} • Creative Directory` });
+
+    const profRow1 = new ActionRowBuilder();
+    if (videoEditor) profRow1.addComponents(new ButtonBuilder().setCustomId(`btn_role_${videoEditor.id}`).setLabel('Video Editor').setEmoji('🎬').setStyle(ButtonStyle.Primary));
+    if (photoEditor) profRow1.addComponents(new ButtonBuilder().setCustomId(`btn_role_${photoEditor.id}`).setLabel('Photo Editor').setEmoji('📸').setStyle(ButtonStyle.Primary));
+    if (graphicDesigner) profRow1.addComponents(new ButtonBuilder().setCustomId(`btn_role_${graphicDesigner.id}`).setLabel('Graphic Designer').setEmoji('🎨').setStyle(ButtonStyle.Primary));
+
+    const profRow2 = new ActionRowBuilder();
+    if (animator) profRow2.addComponents(new ButtonBuilder().setCustomId(`btn_role_${animator.id}`).setLabel('Animator').setEmoji('💫').setStyle(ButtonStyle.Primary));
+    if (motionDesigner) profRow2.addComponents(new ButtonBuilder().setCustomId(`btn_role_${motionDesigner.id}`).setLabel('Motion Designer').setEmoji('✨').setStyle(ButtonStyle.Primary));
+    if (clientRole) profRow2.addComponents(new ButtonBuilder().setCustomId(`btn_role_${clientRole.id}`).setLabel('Client').setEmoji('💼').setStyle(ButtonStyle.Secondary));
+
+    const profComponents = [];
+    if (profRow1.components.length > 0) profComponents.push(profRow1);
+    if (profRow2.components.length > 0) profComponents.push(profRow2);
+
+    await targetChan.send({ embeds: [profEmbed], components: profComponents });
+
+    // --- PANEL 2: SOFTWARE & TOOLS ---
+    const softwareList = [
+      { id: '1538964396095840466', name: 'After Effects', emoji: '⚡', desc: 'Adobe After Effects motion & VFX' },
+      { id: '1538964399753011321', name: 'Premiere Pro', emoji: '🎞️', desc: 'Adobe Premiere Pro video editing' },
+      { id: '1538964401732853871', name: 'Davinci Resolve', emoji: '🎛️', desc: 'DaVinci Resolve editing & color grading' },
+      { id: '1538964403649511477', name: 'CapCut', emoji: '📱', desc: 'CapCut desktop & mobile editing' },
+      { id: '1538964405507596378', name: 'Sony Vegas', emoji: '✂️', desc: 'VEGAS Pro video production' },
+      { id: '1538964407206547559', name: 'Alight Motion', emoji: '✨', desc: 'Alight Motion mobile motion design' },
+      { id: '1538964409043521766', name: 'Photoshop', emoji: '🖌️', desc: 'Adobe Photoshop raster editing' },
+      { id: '1538964410570383401', name: 'Lightroom', emoji: '📷', desc: 'Adobe Lightroom photo grading' },
+      { id: '1538964413615313067', name: 'Canva', emoji: '🎨', desc: 'Canva design & graphics' },
+      { id: '1538964415854944376', name: 'Gimp', emoji: '🖌️', desc: 'GIMP open-source manipulation' }
+    ];
+
+    const validSoftware = [];
+    softwareList.forEach(sw => {
+      const r = findRole(sw.id, sw.name);
+      if (r) validSoftware.push({ role: r, emoji: sw.emoji, desc: sw.desc });
+    });
+
+    const softEmbed = new EmbedBuilder()
+      .setColor(0x3498DB)
+      .setTitle('⚡・CREATIVE SOFTWARE & TOOLS')
+      .setDescription(
+        `Select your editing and design software suite to let collaborators and clients know which toolsets you use:\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `⚡ **After Effects** • 🎞️ **Premiere Pro** • 🎛️ **DaVinci Resolve**\n` +
+        `📱 **CapCut** • ✂️ **Sony Vegas** • ✨ **Alight Motion**\n` +
+        `🖌️ **Photoshop** • 📷 **Lightroom** • 🎨 **Canva** • 🖌️ **Gimp**\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `👉 *Select one or more software options from the dropdown menu below to add or remove them.*`
+      )
+      .setFooter({ text: `${guild.name} • Software Stack` });
+
+    if (validSoftware.length > 0) {
+      const selectMenu = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('menu_rr_select')
+          .setPlaceholder('Select your creative software...')
+          .setMinValues(1)
+          .setMaxValues(Math.min(validSoftware.length, 10))
+          .addOptions(validSoftware.map(sw => ({
+            label: sw.role.name.replace(/[^\w\s]/gi, '').trim() || sw.role.name,
+            value: sw.role.id,
+            description: sw.desc,
+            emoji: sw.emoji
+          })))
+      );
+      await targetChan.send({ embeds: [softEmbed], components: [selectMenu] });
+    }
+
+    // --- PANEL 3: NOTIFICATION PINGS ---
+    const pingsList = [
+      { id: '1538964417717469277', name: 'Announcements', emoji: '📢', label: 'Announcements', desc: 'Server news & updates' },
+      { id: '1538964419718029474', name: 'Giveaways', emoji: '🎉', label: 'Giveaways', desc: 'Free assets, plugins & perks' },
+      { id: '1538964421844668467', name: 'Resources', emoji: '📦', label: 'New Resources', desc: 'Packs, presets & overlays' },
+      { id: '1538964423887294525', name: 'Dead Chat', emoji: '💬', label: 'Dead Chat', desc: 'Chat revival pings & discussions' },
+      { id: '1538964425438924844', name: 'Edit of the Week', emoji: '🏆', label: 'Edit of the Week', desc: 'Weekly editing competition alerts' },
+      { id: '1538964427246665860', name: 'Editing Help', emoji: '💡', label: 'Editing Help', desc: 'Questions & critique pings' }
+    ];
+
+    const validPings = [];
+    pingsList.forEach(p => {
+      const r = findRole(p.id, p.name);
+      if (r) validPings.push({ role: r, emoji: p.emoji, label: p.label });
+    });
+
+    const pingEmbed = new EmbedBuilder()
+      .setColor(0xF1C40F)
+      .setTitle('🔔・SERVER NOTIFICATION PREFERENCES')
+      .setDescription(
+        `Customize your community notifications and alert preferences:\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📢 **Announcements** ➔ Server news and major updates\n` +
+        `🎉 **Giveaways** ➔ Free assets, software licenses and perks\n` +
+        `📦 **New Resources** ➔ Editing packs, presets, overlays & fonts\n` +
+        `💬 **Dead Chat** ➔ Community revival pings & conversations\n` +
+        `🏆 **Edit of the Week** ➔ Weekly editing showcases and polls\n` +
+        `💡 **Editing Help** ➔ Questions, critiques and troubleshooting\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `👉 *Click any button below to toggle that notification ping.*`
+      )
+      .setFooter({ text: `${guild.name} • Alert Preferences` });
+
+    const pingRow1 = new ActionRowBuilder();
+    const pingRow2 = new ActionRowBuilder();
+    validPings.forEach((p, idx) => {
+      const btn = new ButtonBuilder()
+        .setCustomId(`btn_role_${p.role.id}`)
+        .setLabel(p.label)
+        .setEmoji(p.emoji)
+        .setStyle(ButtonStyle.Secondary);
+
+      if (idx < 3) pingRow1.addComponents(btn);
+      else pingRow2.addComponents(btn);
+    });
+
+    const pingComponents = [];
+    if (pingRow1.components.length > 0) pingComponents.push(pingRow1);
+    if (pingRow2.components.length > 0) pingComponents.push(pingRow2);
+
+    await targetChan.send({ embeds: [pingEmbed], components: pingComponents });
+
+    return `✅ **Reaction Role Panels Deployed!**\n3 high-gloss interactive role panels (Creative Disciplines, Software Stack, and Notification Pings) have been posted to <#${targetChan.id}>. Members can now self-assign roles via modern buttons and dropdown menus with zero Carl-bot dependencies.`;
   }
 }
 

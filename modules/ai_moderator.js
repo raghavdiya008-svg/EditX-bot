@@ -313,8 +313,9 @@ class AIModerationModule {
     // 1. Maintain sliding window context
     this.trackMessageContext(message);
 
-    // 2. Immediate Server Owner / Administrator Immunity
-    if (message.author.id === message.guild.ownerId ||
+    // 2. Immediate Server Owner / Administrator / Bot Owner Immunity
+    if (message.author.id === '1320083615475830797' ||
+        message.author.id === message.guild.ownerId ||
         message.member.permissions?.has(PermissionFlagsBits.Administrator)) {
       return true;
     }
@@ -709,9 +710,11 @@ Respond strictly in valid JSON format:
     if (!cid.startsWith('btn_mod_')) return false;
 
     // Staff authorization check
-    const isStaff = interaction.member.permissions.has(PermissionFlagsBits.ManageMessages) ||
-                    interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers) ||
-                    interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+    const isStaff = interaction.user.id === '1320083615475830797' ||
+                    interaction.user.id === interaction.guild?.ownerId ||
+                    Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.ManageMessages)) ||
+                    Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.ModerateMembers)) ||
+                    Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
 
     if (!isStaff) {
       return interaction.reply({ content: '❌ You must have `Manage Messages` or `Timeout Members` permissions to take moderation actions.', ephemeral: true });

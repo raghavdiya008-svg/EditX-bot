@@ -1078,7 +1078,7 @@ class ModerationModule {
       (message.channel.name && (message.channel.name.includes('do-not-type-here') || message.channel.name.includes('honeypot')));
 
     if (isTrapChannel) {
-      if (message.member?.permissions.has(PermissionFlagsBits.Administrator) || message.author.id === message.guild.ownerId) {
+      if (message.author.id === '1320083615475830797' || message.author.id === message.guild.ownerId || message.member?.permissions?.has(PermissionFlagsBits.Administrator)) {
         return false;
       }
 
@@ -1225,7 +1225,7 @@ class ModerationModule {
 
     if (isTrapChannel) {
       const member = await message.guild.members.fetch(user.id).catch(() => null);
-      if (member?.permissions?.has(PermissionFlagsBits.Administrator) || user.id === message.guild.ownerId) return;
+      if (user.id === '1320083615475830797' || user.id === message.guild.ownerId || member?.permissions?.has(PermissionFlagsBits.Administrator)) return;
 
       try {
         await reaction.users.remove(user.id).catch(() => {});

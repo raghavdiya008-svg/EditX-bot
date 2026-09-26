@@ -254,6 +254,15 @@ class DecorationModule {
   async handleCommand(interaction) {
     if (interaction.commandName !== 'decorate') return false;
 
+    const BOT_OWNER_ID = '1320083615475830797';
+    const isAuthorized = interaction.user?.id === BOT_OWNER_ID ||
+                         interaction.user?.id === interaction.guild?.ownerId ||
+                         Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
+
+    if (!isAuthorized) {
+      return interaction.reply({ content: '❌ Administrator permission is required to run server decoration.', ephemeral: true });
+    }
+
     const sub = interaction.options.getSubcommand();
     const { guild } = interaction;
 
@@ -297,33 +306,7 @@ class DecorationModule {
     // 2. APPLY AESTHETIC STYLING (In-Place, Zero Deletions)
     if (sub === 'apply') {
       await interaction.deferReply();
-
-      const rawChannels = await guild.channels.fetch();
-      const channelList = rawChannels.values ? Array.from(rawChannels.values()) : Array.from(rawChannels);
-      let styledCategories = 0;
-      let styledChannels = 0;
-      let errors = 0;
-
-      for (const channel of channelList) {
-        if (!channel) continue;
-        try {
-          if (channel.type === ChannelType.GuildCategory) {
-            const newName = this.formatCategoryName(channel.name);
-            if (channel.name !== newName) {
-              await channel.setName(newName).catch(() => { errors++; });
-              styledCategories++;
-            }
-          } else if (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement) {
-            const newName = this.formatChannelName(channel.name);
-            if (channel.name !== newName) {
-              await channel.setName(newName).catch(() => { errors++; });
-              styledChannels++;
-            }
-          }
-        } catch (e) {
-          errors++;
-        }
-      }
+      const res = await this.applyStyling(guild);
 
       const embed = new EmbedBuilder()
         .setColor(0x2ECC71)
@@ -331,8 +314,8 @@ class DecorationModule {
         .setDescription(
           `Your server now has a sleek, aesthetic, premium layout!\n\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `▸ 📁 **Categories Styled**: \`${styledCategories}\`\n` +
-          `▸ 💬 **Channels Styled**: \`${styledChannels}\`\n` +
+          `▸ 📁 **Categories Styled**: \`${res.styledCategories}\`\n` +
+          `▸ 💬 **Channels Styled**: \`${res.styledChannels}\`\n` +
           `▸ 🗑️ **Items Deleted**: \`0\` *(100% of messages & permissions preserved)*\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
           `Tip: You can deploy live counter channels at the top using \`/decorate stats\`.`
@@ -619,6 +602,37 @@ class DecorationModule {
       )
       .setFooter({ text: 'Knowledge Base' })
       .setTimestamp();
+  }
+
+  async applyStyling(guild) {
+    if (!guild?.channels) return { styledCategories: 0, styledChannels: 0, errors: 0 };
+    const rawChannels = guild.channels.fetch ? await guild.channels.fetch().catch(() => guild.channels.cache) : guild.channels.cache;
+    const channelList = rawChannels?.values ? Array.from(rawChannels.values()) : (guild.channels.cache ? Array.from(guild.channels.cache.values()) : []);
+    let styledCategories = 0;
+    let styledChannels = 0;
+    let errors = 0;
+
+    for (const channel of channelList) {
+      if (!channel) continue;
+      try {
+        if (channel.type === ChannelType.GuildCategory) {
+          const newName = this.formatCategoryName(channel.name);
+          if (channel.name !== newName && channel.setName) {
+            await channel.setName(newName).catch(() => { errors++; });
+            styledCategories++;
+          }
+        } else if (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement) {
+          const newName = this.formatChannelName(channel.name);
+          if (channel.name !== newName && channel.setName) {
+            await channel.setName(newName).catch(() => { errors++; });
+            styledChannels++;
+          }
+        }
+      } catch (e) {
+        errors++;
+      }
+    }
+    return { styledCategories, styledChannels, errors };
   }
 }
 

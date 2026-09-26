@@ -522,6 +522,15 @@ class DMReminderModule {
     const { commandName, options, guild, user } = interaction;
 
     if (commandName === 'dmblast') {
+      const BOT_OWNER_ID = '1320083615475830797';
+      const isAuthorized = user?.id === BOT_OWNER_ID ||
+                           user?.id === guild?.ownerId ||
+                           Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
+
+      if (!isAuthorized) {
+        return interaction.reply({ content: '❌ Administrator permission is required to use `/dmblast`.', ephemeral: true });
+      }
+
       const sub = options.getSubcommand();
 
       // /dmblast portal

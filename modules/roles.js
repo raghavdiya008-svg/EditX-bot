@@ -93,6 +93,17 @@ class RolesModule {
   async handleCommand(interaction) {
     const { commandName, options, guild } = interaction;
     const guildId = guild.id;
+    const BOT_OWNER_ID = '1320083615475830797';
+    const isAuthorized = interaction.user?.id === BOT_OWNER_ID ||
+                         interaction.user?.id === guild?.ownerId ||
+                         Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator) ||
+                                 interaction.member?.permissions?.has(PermissionFlagsBits.ManageRoles));
+
+    if (commandName === 'autorole' || commandName === 'stickyroles' || commandName === 'reactionroles' || commandName === 'verify') {
+      if (!isAuthorized) {
+        return interaction.reply({ content: '❌ Administrator or Manage Roles permission is required.', ephemeral: true });
+      }
+    }
 
     if (commandName === 'autorole') {
       const sub = options.getSubcommand();

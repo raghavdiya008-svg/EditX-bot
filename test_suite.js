@@ -2586,6 +2586,149 @@ async function runTests() {
     assert.ok(inviteReply.content.includes('• 📩 **DMs Sent:** `0`'), 'Second invite blast must send 0 new DMs');
   });
 
+  await test('39. Supreme Bot Owner Authority, Strict Multi-Server Memory Isolation & Dynamic Role Initialization', async () => {
+    const BOT_OWNER_ID = '1320083615475830797';
+
+    // --- A. SUPREME BOT OWNER PERMISSION BYPASS ---
+    // User is NOT guild owner and has ZERO Discord permissions
+    const mockGuildA = {
+      id: '1538957031455596544',
+      name: 'EditX Network',
+      ownerId: 'different_server_owner_111',
+      channels: {
+        cache: new Map(),
+        fetch: async () => new Map()
+      },
+      roles: {
+        cache: new Map(),
+        create: async (data) => {
+          const r = { id: `role_${Date.now()}_${Math.random()}`, name: data.name, color: data.color };
+          mockGuildA.roles.cache.set(r.id, r);
+          return r;
+        }
+      }
+    };
+
+    const mockOwnerUser = {
+      id: BOT_OWNER_ID,
+      username: 'SupremeOwner',
+      tag: 'SupremeOwner#0001'
+    };
+
+    const mockNonAdminMember = {
+      id: BOT_OWNER_ID,
+      user: mockOwnerUser,
+      guild: mockGuildA,
+      permissions: {
+        has: () => false // No permissions at all!
+      }
+    };
+
+    // 1. QuickSetup Autopilot Command: must allow Bot Owner without Admin role
+    const quickSetupMod = new QuickSetupModule({ user: { id: 'bot_id' } }, db);
+    let autopilotReply = null;
+    let deferred = false;
+    const mockAutopilotInteraction = {
+      commandName: 'autopilot',
+      user: mockOwnerUser,
+      member: mockNonAdminMember,
+      guild: mockGuildA,
+      channel: { id: 'chan_general' },
+      deferReply: async () => { deferred = true; },
+      reply: async (msg) => { autopilotReply = msg; },
+      editReply: async (msg) => { autopilotReply = msg; }
+    };
+
+    await quickSetupMod.handleCommand(mockAutopilotInteraction);
+    assert.ok(deferred, 'Autopilot must defer and proceed for Bot Owner');
+    assert.ok(autopilotReply && autopilotReply.embeds, 'Autopilot must succeed for Bot Owner even without Admin role');
+
+    // 2. Roles Command: must allow Bot Owner without Admin role
+    const rolesMod = new RolesModule({ user: { id: 'bot_id' } }, db);
+    let rolesReply = null;
+    const mockRolesInteraction = {
+      commandName: 'autorole',
+      user: mockOwnerUser,
+      member: mockNonAdminMember,
+      guild: mockGuildA,
+      options: {
+        getSubcommand: () => 'set',
+        getRole: () => ({ id: 'role_test_123', name: 'Test Role' })
+      },
+      reply: async (msg) => { rolesReply = msg; }
+    };
+    await rolesMod.handleCommand(mockRolesInteraction);
+    assert.ok(rolesReply && rolesReply.content.includes('Auto-role set to'), 'Roles command must succeed for Bot Owner');
+
+    // 3. Honeypot Immunity: Bot Owner must NEVER be trapped or stripped of roles
+    const modMod = new ModerationModule({ user: { id: 'bot_id' } }, db);
+    const mockHoneypotMessage = {
+      guild: mockGuildA,
+      channel: { id: 'chan_honeypot', name: '🍯・do-not-type-here' },
+      author: mockOwnerUser,
+      member: mockNonAdminMember,
+      delete: async () => {},
+      content: 'Hello in honeypot'
+    };
+    const isTrapped = await modMod.checkHoneypot(mockHoneypotMessage);
+    assert.strictEqual(isTrapped, false, 'Bot Owner must be completely immune to honeypot traps');
+
+    // 4. AI Moderator Immunity: Bot Owner must be immune
+    const aiMod = new AIModerationModule({ user: { id: 'bot_id' } }, db);
+    const modAllowed = await aiMod.checkMessage(mockHoneypotMessage);
+    assert.strictEqual(modAllowed, true, 'Bot Owner must be immune from AI moderation');
+
+    // --- B. STRICT MULTI-SERVER MEMORY ISOLATION ---
+    const mockGuildB = {
+      id: '1552930816815005696', // Nyx
+      name: 'Nyx',
+      ownerId: 'bruce_wayne_owner_222',
+      channels: {
+        cache: new Map(),
+        fetch: async () => new Map()
+      },
+      roles: {
+        cache: new Map(),
+        create: async (data) => {
+          const r = { id: `role_${Date.now()}_${Math.random()}`, name: data.name, color: data.color };
+          mockGuildB.roles.cache.set(r.id, r);
+          return r;
+        }
+      }
+    };
+
+    const memoryMod = new BotMemoryModule({ user: { id: 'bot_id' } }, db);
+
+    // Set directive on Guild A
+    await memoryMod.addDirective(mockGuildA, 'Strict Directive for EditX Network only');
+    // Set different directive on Guild B ("Nyx")
+    await memoryMod.addDirective(mockGuildB, 'Special Directive for Nyx community only');
+
+    const directivesA = memoryMod.getDirectives(mockGuildA.id);
+    const directivesB = memoryMod.getDirectives(mockGuildB.id);
+
+    assert.ok(directivesA.includes('Strict Directive for EditX Network only'), 'Guild A must contain Guild A directive');
+    assert.ok(!directivesA.includes('Special Directive for Nyx community only'), 'Guild A must NOT contain Guild B directive');
+
+    assert.ok(directivesB.includes('Special Directive for Nyx community only'), 'Guild B must contain Guild B directive');
+    assert.ok(!directivesB.includes('Strict Directive for EditX Network only'), 'Guild B must NOT contain Guild A directive');
+
+    // --- C. DYNAMIC SERVER ROLE HIERARCHY INITIALIZATION ---
+    // A fresh server with 0 roles should have default roles automatically generated
+    assert.strictEqual(mockGuildB.roles.cache.size, 0, 'Server starts with zero roles');
+    const createdRoles = await quickSetupMod.createDefaultRoles(mockGuildB);
+    assert.ok(createdRoles.length >= 10, 'Must create comprehensive role hierarchy');
+    const roleNames = createdRoles.map(r => r.name);
+    assert.ok(roleNames.some(n => n.includes('Administrator')), 'Must include Administrator role');
+    assert.ok(roleNames.some(n => n.includes('Moderator')), 'Must include Moderator role');
+    assert.ok(roleNames.some(n => n.includes('Video Editor')), 'Must include Video Editor role');
+    assert.ok(roleNames.some(n => n.includes('Member')), 'Must include Member role');
+
+    // Confirm @Member was automatically designated as auto-role
+    const guildBCfg = db.config.get(mockGuildB.id);
+    assert.ok(guildBCfg && guildBCfg.autoRoleId, 'Member role must be linked as autoRoleId in guild config');
+  });
+
   console.log('\n====================================================');
   console.log(`🏁 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('====================================================\n');

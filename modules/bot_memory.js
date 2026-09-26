@@ -105,6 +105,15 @@ class BotMemoryModule {
     if (interaction.commandName !== 'memory' && interaction.commandName !== 'scan' && interaction.commandName !== 'rule' && interaction.commandName !== 'rules') return false;
 
     const guild = interaction.guild;
+    const BOT_OWNER_ID = '1320083615475830797';
+    const isAuthorized = interaction.user?.id === BOT_OWNER_ID ||
+                         interaction.user?.id === guild?.ownerId ||
+                         Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
+
+    if (!isAuthorized) {
+      return interaction.reply({ content: '❌ Administrator permission is required to manage server rules and memory.', ephemeral: true });
+    }
+
     await interaction.deferReply({ ephemeral: true });
 
     if (interaction.commandName === 'rules') {
@@ -135,68 +144,9 @@ class BotMemoryModule {
       }
 
       if (sub === 'update') {
-        let targetChan = interaction.options.getChannel('channel');
-        if (!targetChan && guild.channels?.cache) {
-          const chanList = Array.from(guild.channels.cache.values()).filter(Boolean);
-          targetChan = chanList.find(c =>
-            c.type === ChannelType.GuildText && (
-              /^(?:📜・)?rules$/i.test(c.name) ||
-              /rules[-_]?and[-_]?info/i.test(c.name) ||
-              /server[-_]?rules/i.test(c.name) ||
-              /guidelines/i.test(c.name) ||
-              /welcome[-_]?rules/i.test(c.name)
-            )
-          );
-        }
-
-        if (!targetChan) {
-          return interaction.editReply({
-            content: '❌ Could not find a dedicated `#rules` channel. Please create one or select a channel using `/rules update channel:#your-rules-channel`.'
-          });
-        }
-
-        await this.scanServer(guild, interaction.user).catch(() => {});
-
-        const serverName = guild.name;
-        const icon = (guild.iconURL && typeof guild.iconURL === 'function') ? guild.iconURL({ dynamic: true }) : undefined;
-
-        const rulesEmbed = new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setAuthor({ name: `${serverName} • Official Guidelines`, iconURL: icon })
-          .setTitle(`📜 Community Rules & Code of Conduct`)
-          .setDescription(
-            `Welcome to **${serverName}**! By participating in this server, all members agree to adhere to our community guidelines.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
-          )
-          .addFields(
-            { name: '1️⃣ Respect & Professional Conduct', value: 'Treat every creator, editor, and client with respect. Harassment, hate speech, discrimination, toxicity, and personal attacks will result in an immediate ban.' },
-            { name: '2️⃣ Zero Tolerance for Phishing & Malicious Content', value: 'Never post unverified executable files (`.exe`, `.scr`, `.bat`), fake Nitro links, or phishing domains. Suspicious links are instantly trapped.' },
-            { name: '3️⃣ Media & Showcase Guidelines', value: 'Keep video edits, VFX reels, and graphics in dedicated showcase channels. Do not spam links or media in general discussions without context.' },
-            { name: '4️⃣ Hiring & Freelance Transparency', value: 'All commission offers and hiring posts must state a verifiable budget, turnaround time, and payment terms. Free work requests are strictly prohibited in paid channels.' },
-            { name: '5️⃣ No Unsolicited Advertising or DM Promotion', value: 'Do not mass-DM server members with unsolicited invites, services, or self-promotion. Unsolicited advertisement DMs will be reported and banned.' },
-            { name: '6️⃣ Staff Direction & Discord ToS', value: 'Follow instructions from server staff and moderators. All activities must comply with Discord Terms of Service.' }
-          )
-          .setFooter({ text: `${serverName} • Rules are enforced 24/7 by EditX Security` })
-          .setTimestamp();
-
-        const rulesText =
-          '1. Respect & Professional Conduct\n' +
-          '2. Zero Tolerance for Phishing & Malicious Content\n' +
-          '3. Media & Showcase Guidelines in dedicated channels\n' +
-          '4. Hiring & Freelance Transparency (Budget required)\n' +
-          '5. No Unsolicited Advertising or DM Promotion\n' +
-          '6. Staff Direction & Discord Terms of Service Compliance';
-
-        const secDb = this.db.security || this.configDb;
-        secDb.set(`rules_${guild.id}`, rulesText);
-        await this.syncDirectives(guild).catch(() => {});
-
-        await targetChan.send({ embeds: [rulesEmbed] });
-
-        return interaction.editReply({
-          content: `✅ **Server Rules Successfully Published & Synchronized!**\n` +
-            `• Posted to: <#${targetChan.id}>\n` +
-            `• Synchronized with: EditX AI Memory & Moderation Sentinel`
-        });
+        let targetChan = interaction.options?.getChannel?.('channel');
+        const res = await this.publishCommunityRules(guild, targetChan);
+        return interaction.editReply(res);
       }
     }
 
@@ -1026,8 +976,8 @@ class BotMemoryModule {
       }
 
       // 4. Extract roles
-      let roles = guild.roles.cache ? Array.from(guild.roles.cache.values()) : [];
-      if (guild.roles.fetch) {
+      let roles = guild.roles?.cache ? Array.from(guild.roles.cache.values()) : [];
+      if (guild.roles?.fetch) {
         const fetchedRoles = await guild.roles.fetch().catch(() => null);
         if (fetchedRoles) roles = Array.from(fetchedRoles.values());
       }
@@ -1121,6 +1071,72 @@ class BotMemoryModule {
       console.error('[BOT SCAN ERROR]', err);
       return { success: false, error: err.message };
     }
+  }
+
+  async publishCommunityRules(guild, targetChan = null) {
+    if (!guild) return { content: '❌ Guild not found.' };
+
+    if (!targetChan && guild.channels?.cache) {
+      const chanList = Array.from(guild.channels.cache.values()).filter(Boolean);
+      targetChan = chanList.find(c =>
+        c.type === ChannelType.GuildText && (
+          /^(?:📜・)?rules$/i.test(c.name) ||
+          /rules[-_]?and[-_]?info/i.test(c.name) ||
+          /server[-_]?rules/i.test(c.name) ||
+          /guidelines/i.test(c.name) ||
+          /welcome[-_]?rules/i.test(c.name)
+        )
+      );
+    }
+
+    if (!targetChan) {
+      return {
+        content: '❌ Could not find a dedicated `#rules` channel. Please create one or select a channel using `/rules update channel:#your-rules-channel`.'
+      };
+    }
+
+    await this.scanServer(guild).catch(() => {});
+
+    const serverName = guild.name;
+    const icon = (guild.iconURL && typeof guild.iconURL === 'function') ? guild.iconURL({ dynamic: true }) : undefined;
+
+    const rulesEmbed = new EmbedBuilder()
+      .setColor(0x5865F2)
+      .setAuthor({ name: `${serverName} • Official Guidelines`, iconURL: icon })
+      .setTitle(`📜 Community Rules & Code of Conduct`)
+      .setDescription(
+        `Welcome to **${serverName}**! By participating in this server, all members agree to adhere to our community guidelines.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+      )
+      .addFields(
+        { name: '1️⃣ Respect & Professional Conduct', value: 'Treat every creator, editor, and client with respect. Harassment, hate speech, discrimination, toxicity, and personal attacks will result in an immediate ban.' },
+        { name: '2️⃣ Zero Tolerance for Phishing & Malicious Content', value: 'Never post unverified executable files (`.exe`, `.scr`, `.bat`), fake Nitro links, or phishing domains. Suspicious links are instantly trapped.' },
+        { name: '3️⃣ Media & Showcase Guidelines', value: 'Keep video edits, VFX reels, and graphics in dedicated showcase channels. Do not spam links or media in general discussions without context.' },
+        { name: '4️⃣ Hiring & Freelance Transparency', value: 'All commission offers and hiring posts must state a verifiable budget, turnaround time, and payment terms. Free work requests are strictly prohibited in paid channels.' },
+        { name: '5️⃣ No Unsolicited Advertising or DM Promotion', value: 'Do not mass-DM server members with unsolicited invites, services, or self-promotion. Unsolicited advertisement DMs will be reported and banned.' },
+        { name: '6️⃣ Staff Direction & Discord ToS', value: 'Follow instructions from server staff and moderators. All activities must comply with Discord Terms of Service.' }
+      )
+      .setFooter({ text: `${serverName} • Rules are enforced 24/7 by EditX Security` })
+      .setTimestamp();
+
+    const rulesText =
+      '1. Respect & Professional Conduct\n' +
+      '2. Zero Tolerance for Phishing & Malicious Content\n' +
+      '3. Media & Showcase Guidelines in dedicated channels\n' +
+      '4. Hiring & Freelance Transparency (Budget required)\n' +
+      '5. No Unsolicited Advertising or DM Promotion\n' +
+      '6. Staff Direction & Discord Terms of Service Compliance';
+
+    const secDb = this.db.security || this.configDb;
+    secDb.set(`rules_${guild.id}`, rulesText);
+    await this.syncDirectives(guild).catch(() => {});
+
+    await targetChan.send({ embeds: [rulesEmbed] });
+
+    return {
+      content: `✅ **Server Rules Successfully Published & Synchronized!**\n` +
+        `• Posted to: <#${targetChan.id}>\n` +
+        `• Synchronized with: EditX AI Memory & Moderation Sentinel`
+    };
   }
 
   async runScheduledBackups() {

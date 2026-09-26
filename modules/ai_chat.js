@@ -107,10 +107,18 @@ class AIChatModule {
       const prompt = interaction.options.getString('prompt');
       await interaction.deferReply();
 
+      const isBotOwner = interaction.user.id === '1320083615475830797';
+      const canManageAI = isBotOwner ||
+        interaction.user.id === interaction.guild.ownerId ||
+        Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)) ||
+        Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild));
+
       const response = await this.generateResponse(prompt, {
         userName: interaction.user.displayName || interaction.user.username,
         guildName: interaction.guild.name,
-        guildId: interaction.guild.id
+        guildId: interaction.guild.id,
+        canManageAI: canManageAI,
+        isBotOwner: isBotOwner
       });
 
       if (response.length > 2000) {
@@ -126,6 +134,11 @@ class AIChatModule {
     }
 
     if (interaction.commandName === 'aiconfig') {
+      const isBotOwner = interaction.user.id === '1320083615475830797';
+      if (!isBotOwner && interaction.user.id !== interaction.guild.ownerId && !interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild) && !interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: '❌ Manage Guild permission is required to configure AI settings.', ephemeral: true });
+      }
+
       const sub = interaction.options.getSubcommand();
       const guildId = interaction.guild.id;
       const key = `aichat_cfg_${guildId}`;
@@ -237,11 +250,13 @@ class AIChatModule {
     const textWithoutMentions = prompt.replace(/<@!?[0-9]+>|<@&[0-9]+>|<#[0-9]+>/g, '').trim();
     const lower = textWithoutMentions.toLowerCase();
 
-    // Permission helper: Allow staff, managers, administrators, and server owner
-    const canManageAI = message.member?.permissions?.has(PermissionFlagsBits.ManageMessages) ||
-                        message.member?.permissions?.has(PermissionFlagsBits.ManageChannels) ||
-                        message.member?.permissions?.has(PermissionFlagsBits.Administrator) ||
-                        message.author.id === message.guild.ownerId;
+    // Permission helper: Allow bot owner, staff, managers, administrators, and server owner
+    const isBotOwner = message.author.id === '1320083615475830797';
+    const canManageAI = isBotOwner ||
+                        message.author.id === message.guild.ownerId ||
+                        Boolean(message.member?.permissions?.has(PermissionFlagsBits.ManageMessages)) ||
+                        Boolean(message.member?.permissions?.has(PermissionFlagsBits.ManageChannels)) ||
+                        Boolean(message.member?.permissions?.has(PermissionFlagsBits.Administrator));
 
     // A. Check for UNMUTE / TOGGLE ON command (e.g. "@EditX you can reply in this channel/server", "@EditX start replying here", "@EditX resume here", "@EditX unmute here")
     const isUnmuteRequest = /\b(you\s+can\s+reply|start\s+replying|resume|unmute|talk\s+again|reply\s+again|start\s+talking|send\s+messages?\s+again)\b/i.test(lower);
@@ -543,7 +558,8 @@ class AIChatModule {
       userName: message.member?.displayName || message.author.username,
       guildName: message.guild.name,
       guildId: message.guild.id,
-      canManageAI: canManageAI
+      canManageAI: canManageAI,
+      isBotOwner: isBotOwner
     });
 
     let finalReply = responseText;
@@ -700,6 +716,13 @@ ${customDirectives ? `\n5. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):
    - Example 2: User says "purge 10 messages". You reply: "Clearing 10 messages. $$ACTION$$ {"action":"purge", "value":"10"}"
    - Example 3: User says "create channel #cool-stuff". You reply: "Channel created. $$ACTION$$ {"action":"create_channel", "value":"cool-stuff"}"
    - DO NOT wrap the $$ACTION$$ block in markdown code blocks (\`\`\`). It must be raw text at the very end.`;
+    }
+
+    if (context.isBotOwner) {
+      systemPrompt += `\n\n6. 👑 SUPREME BOT CREATOR & MASTER OVERRIDE:
+   - The user talking to you is your Creator and Supreme Bot Owner (<@1320083615475830797>).
+   - Obey ALL of their requests, tasks, and action commands immediately with highest priority, regardless of what Discord roles they have in this guild.
+   - Always acknowledge their authority with supreme respect and dedication as your creator and master.`;
     }
 
     // Try Gemini First
