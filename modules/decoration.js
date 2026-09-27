@@ -30,13 +30,25 @@ class DecorationModule {
       'guideline': '📜',
       'welcome': '👋',
       'hello': '👋',
+      'role': '🎭',
+      'cutting-room': '☕',
+      'critique': '🎞️',
+      'feedback': '🎞️',
       'showcase': '🎬',
-      'edit': '🎞️',
-      'video': '🎥',
-      'portfolio': '💼',
-      'feedback': '💡',
-      'critique': '🎨',
-      'general': '💬',
+      'troubleshoot': '💡',
+      'help': '💡',
+      'asset': '📦',
+      'vault': '📦',
+      'hiring': '💼',
+      'job': '💼',
+      'portfolio': '🎨',
+      'for-hire': '🎨',
+      'vouch': '⭐',
+      'remark': '⭐',
+      'self-promotion': '🚀',
+      'promo': '🚀',
+      'booster': '💎',
+      'general': '☕',
       'chat': '💬',
       'lounge': '☕',
       'bot': '🤖',
@@ -48,6 +60,7 @@ class DecorationModule {
       'music': '🎵',
       'mod': '🛡️',
       'log': '📋',
+      'alert': '🚨',
       'ticket': '🎟️',
       'verify': '✅',
       'bump': '🚀',
@@ -91,16 +104,18 @@ class DecorationModule {
   }
 
   /**
-   * Generates a sleek, aesthetic name for any category
+   * Generates a sleek, aesthetic name for any category (Minimalist Studio Pro)
    */
   formatCategoryName(name) {
     const clean = name.replace(/[^\w\s]/g, '').trim().toUpperCase();
-    if (clean.includes('INFO') || clean.includes('WELCOME')) return '╭━━〔 ✦ INFORMATION 〕━━╮';
-    if (clean.includes('MOD') || clean.includes('STAFF') || clean.includes('ADMIN')) return '╭━━〔 🛡️ STAFF QUARTERS 〕━━╮';
-    if (clean.includes('CREATIVE') || clean.includes('EDIT') || clean.includes('PORTFOLIO')) return '╭━━〔 🎬 CREATIVE SUITE 〕━━╮';
-    if (clean.includes('COMMUNITY') || clean.includes('CHAT') || clean.includes('TEXT')) return '╭━━〔 💬 COMMUNITY HUB 〕━━╮';
-    if (clean.includes('VOICE') || clean.includes('VC')) return '╭━━〔 🔊 VOICE LOUNGE 〕━━╮';
-    return `╭━━〔 ✦ ${clean || 'CATEGORY'} 〕━━╮`;
+    if (clean.includes('INFO') || clean.includes('WELCOME')) return '── ✦ I N F O R M A T I O N ──';
+    if (clean.includes('MOD') || clean.includes('STAFF') || clean.includes('ADMIN') || clean.includes('HEADQUARTERS')) return '── 🛡️ H E A D Q U A R T E R S ──';
+    if (clean.includes('CREATIVE') || clean.includes('EDIT') || clean.includes('PORTFOLIO') || clean.includes('COMMUNITY') || clean.includes('HUB')) return '── 🎬 C R E A T I V E  S U I T E ──';
+    if (clean.includes('MARKETPLACE') || clean.includes('HIRING') || clean.includes('JOB') || clean.includes('WORK')) return '── 💼 M A R K E T P L A C E ──';
+    if (clean.includes('VOICE') || clean.includes('VC') || clean.includes('LOUNGE') || clean.includes('STUDIO')) return '── 🔊 S T U D I O  L O U N G E ──';
+    if (clean.includes('SUPPORT') || clean.includes('TICKET')) return '── 🤝 S U P P O R T ──';
+    if (clean.includes('STAT') || clean.includes('MEMBER') || clean.includes('BOOST')) return '── 📊 S E R V E R  S T A T S ──';
+    return `── ✦ ${clean || 'DIRECTORY'} ──`;
   }
 
   /**
