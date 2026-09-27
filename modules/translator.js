@@ -160,49 +160,7 @@ class TranslatorModule {
       // Fall through to AI engines
     }
 
-    // 2. Gemini 3.6 Flash Fallback (Handles complex idioms, romanized slang, Hinglish, etc.)
-    if (this.ai) {
-      try {
-        const prompt = `You are an expert real-time translator for a Discord video editor community.
-Translate the following non-English message into natural, fluent English.
-Preserve the exact meaning, technical editing context, tone, and intent.
-If the text is already English, respond with {"isEnglish": true}.
-Otherwise respond with strictly valid JSON:
-{
-  "isEnglish": false,
-  "sourceLanguage": "Detected Language Name (e.g. Spanish, Hindi, Russian)",
-  "translatedText": "Exact English translation"
-}
-
-Message to translate:
-"""
-${cleanText}
-"""`;
-
-        const geminiRes = await this.ai.models.generateContent({
-          model: 'gemini-3.6-flash',
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            temperature: 0.1
-          }
-        });
-
-        const parsed = this.parseJsonSafe(geminiRes.text);
-        if (parsed && !parsed.isEnglish && parsed.translatedText) {
-          const result = {
-            sourceLanguage: parsed.sourceLanguage || 'Foreign Language',
-            languageCode: 'auto',
-            translatedText: parsed.translatedText.trim(),
-            cachedAt: Date.now()
-          };
-          this.translationCache.set(cacheKey, result);
-          return result;
-        }
-      } catch (gemErr) {}
-    }
-
-    // 3. Groq Fast Fallback (qwen/qwen3.8-27b)
+    // 2. Groq AI Translation (Primary: qwen/qwen3.8-27b)
     if (this.groqKey) {
       try {
         const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -244,7 +202,53 @@ ${cleanText}
             return result;
           }
         }
-      } catch (groqErr) {}
+      } catch (groqErr) {
+        console.warn('[TRANSLATOR] Groq translation failed, falling back to Gemini:', groqErr.message);
+      }
+    }
+
+    // 3. Gemini 3.6 Flash Fallback (Handles complex idioms, romanized slang, Hinglish, etc.)
+    if (this.ai) {
+      try {
+        const prompt = `You are an expert real-time translator for a Discord video editor community.
+Translate the following non-English message into natural, fluent English.
+Preserve the exact meaning, technical editing context, tone, and intent.
+If the text is already English, respond with {"isEnglish": true}.
+Otherwise respond with strictly valid JSON:
+{
+  "isEnglish": false,
+  "sourceLanguage": "Detected Language Name (e.g. Spanish, Hindi, Russian)",
+  "translatedText": "Exact English translation"
+}
+
+Message to translate:
+"""
+${cleanText}
+"""`;
+
+        const geminiRes = await this.ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.1
+          }
+        });
+
+        const parsed = this.parseJsonSafe(geminiRes.text);
+        if (parsed && !parsed.isEnglish && parsed.translatedText) {
+          const result = {
+            sourceLanguage: parsed.sourceLanguage || 'Foreign Language',
+            languageCode: 'auto',
+            translatedText: parsed.translatedText.trim(),
+            cachedAt: Date.now()
+          };
+          this.translationCache.set(cacheKey, result);
+          return result;
+        }
+      } catch (gemErr) {
+        console.warn('[TRANSLATOR] Gemini translation fallback failed:', gemErr.message);
+      }
     }
 
     return null;

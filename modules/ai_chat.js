@@ -725,26 +725,7 @@ ${customDirectives ? `\n5. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):
    - Always acknowledge their authority with supreme respect and dedication as your creator and master.`;
     }
 
-    // Try Gemini First
-    if (this.gemini) {
-      try {
-        const res = await this.gemini.models.generateContent({
-          model: 'gemini-3.6-flash',
-          contents: `${systemPrompt}\n\nUser Question:\n${prompt}`,
-          config: {
-            temperature: 0.5,
-            maxOutputTokens: 500
-          }
-        });
-        if (res.text && res.text.trim()) {
-          return res.text.trim();
-        }
-      } catch (geminiErr) {
-        console.warn('[AI CHAT] Gemini attempt 1 failed:', geminiErr.message);
-      }
-    }
-
-    // Try Groq if available (or as fallback)
+    // 1. Try Groq First (Primary LLM Engine)
     if (this.groqKey) {
       try {
         const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -774,9 +755,30 @@ ${customDirectives ? `\n5. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):
             }
             return reply.trim();
           }
+        } else {
+          console.warn(`[AI CHAT] Groq API returned HTTP ${groqRes.status}, falling back to Gemini...`);
         }
       } catch (groqErr) {
-        console.warn('[AI CHAT] Groq API failed:', groqErr.message);
+        console.warn('[AI CHAT] Groq API attempt failed, falling back to Gemini:', groqErr.message);
+      }
+    }
+
+    // 2. Fallback to Google Gemini
+    if (this.gemini) {
+      try {
+        const res = await this.gemini.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: `${systemPrompt}\n\nUser Question:\n${prompt}`,
+          config: {
+            temperature: 0.5,
+            maxOutputTokens: 500
+          }
+        });
+        if (res.text && res.text.trim()) {
+          return res.text.trim();
+        }
+      } catch (geminiErr) {
+        console.warn('[AI CHAT] Gemini fallback failed:', geminiErr.message);
       }
     }
 

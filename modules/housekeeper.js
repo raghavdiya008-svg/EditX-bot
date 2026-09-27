@@ -153,33 +153,41 @@ If the question is about video editing troubleshooting (Premiere/AE/DaVinci), Di
 If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment disputes, partnership deals, reporting a moderator), state that you have notified the staff team and ask the user to wait patiently.`;
 
     let replyText = '';
-    if (this.ai) {
-      try {
-        const res = await this.ai.models.generateContent({
-          model: 'gemini-3.6-flash',
-          contents: `${systemPrompt}\n\nUser Question:\n${cleanPrompt}`
-        });
-        replyText = res.text ? res.text.trim() : '';
-      } catch (e) {}
-    }
-
-    if (!replyText && this.groqKey) {
+    // 1. Try Groq Primary Engine
+    if (this.groqKey) {
       try {
         const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${this.groqKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: 'qwen/qwen3.8-27b',
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: cleanPrompt }]
+            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: cleanPrompt }],
+            temperature: 0.3,
+            max_tokens: 300
           })
         });
         if (groqRes.ok) {
           const d = await groqRes.json();
           let t = d.choices?.[0]?.message?.content || '';
           if (t.includes('**Answer**')) t = t.split('**Answer**').pop().trim();
-          replyText = t;
+          replyText = t.trim();
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn('[HOUSEKEEPER] Groq attempt failed, falling back to Gemini:', e.message);
+      }
+    }
+
+    // 2. Fallback to Gemini 3.6 Flash
+    if (!replyText && this.ai) {
+      try {
+        const res = await this.ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: `${systemPrompt}\n\nUser Question:\n${cleanPrompt}`
+        });
+        replyText = res.text ? res.text.trim() : '';
+      } catch (e) {
+        console.warn('[HOUSEKEEPER] Gemini fallback failed:', e.message);
+      }
     }
 
     if (!replyText) {
@@ -362,12 +370,41 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
         const textToSummarize = msgList.join('\n');
 
         let summary = 'Chat activity was normal and positive.';
-        if (this.ai && textToSummarize) {
-          const res = await this.ai.models.generateContent({
-            model: 'gemini-3.6-flash',
-            contents: `Summarize the following Discord channel messages into 3 concise bullet points for the server owner. Focus on key topics, questions, or issues:\n\n${textToSummarize.slice(0, 2000)}`
-          });
-          summary = res.text ? res.text.trim() : summary;
+        if (textToSummarize) {
+          const summarizePrompt = `Summarize the following Discord channel messages into 3 concise bullet points for the server owner. Focus on key topics, questions, or issues:\n\n${textToSummarize.slice(0, 2000)}`;
+          if (this.groqKey) {
+            try {
+              const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${this.groqKey}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  model: 'qwen/qwen3.8-27b',
+                  messages: [{ role: 'user', content: summarizePrompt }],
+                  temperature: 0.3,
+                  max_tokens: 300
+                })
+              });
+              if (groqRes.ok) {
+                const d = await groqRes.json();
+                let t = d.choices?.[0]?.message?.content || '';
+                if (t.includes('**Answer**')) t = t.split('**Answer**').pop().trim();
+                if (t.trim()) summary = t.trim();
+              }
+            } catch (e) {
+              console.warn('[HOUSEKEEPER] Groq summarizer failed, falling back to Gemini:', e.message);
+            }
+          }
+          if (summary === 'Chat activity was normal and positive.' && this.ai) {
+            try {
+              const res = await this.ai.models.generateContent({
+                model: 'gemini-3.6-flash',
+                contents: summarizePrompt
+              });
+              summary = res.text ? res.text.trim() : summary;
+            } catch (e) {
+              console.warn('[HOUSEKEEPER] Gemini summarizer failed:', e.message);
+            }
+          }
         }
 
         const embed = new EmbedBuilder()
@@ -422,14 +459,43 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
       await interaction.deferReply();
 
       let drafted = '';
-      if (this.ai) {
-        const res = await this.ai.models.generateContent({
-          model: 'gemini-3.6-flash',
-          contents: `You are an expert Discord community manager for EditX (Video editing and creator network).
+      const draftPrompt = `You are an expert Discord community manager for EditX (Video editing and creator network).
 Draft an engaging, professional community announcement based on this prompt: "${prompt}".
-Include clean typography, clear bullet points, rules/details, and relevant emojis.`
-        });
-        drafted = res.text ? res.text.trim() : '';
+Include clean typography, clear bullet points, rules/details, and relevant emojis.`;
+
+      if (this.groqKey) {
+        try {
+          const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${this.groqKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'qwen/qwen3.8-27b',
+              messages: [{ role: 'user', content: draftPrompt }],
+              temperature: 0.5,
+              max_tokens: 600
+            })
+          });
+          if (groqRes.ok) {
+            const d = await groqRes.json();
+            let t = d.choices?.[0]?.message?.content || '';
+            if (t.includes('**Answer**')) t = t.split('**Answer**').pop().trim();
+            drafted = t.trim();
+          }
+        } catch (e) {
+          console.warn('[HOUSEKEEPER] Groq announcement drafter failed, falling back to Gemini:', e.message);
+        }
+      }
+
+      if (!drafted && this.ai) {
+        try {
+          const res = await this.ai.models.generateContent({
+            model: 'gemini-3.6-flash',
+            contents: draftPrompt
+          });
+          drafted = res.text ? res.text.trim() : '';
+        } catch (e) {
+          console.warn('[HOUSEKEEPER] Gemini announcement drafter failed:', e.message);
+        }
       }
 
       if (!drafted) {

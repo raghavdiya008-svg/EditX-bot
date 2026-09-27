@@ -418,25 +418,9 @@ class AIModerationModule {
       return { ...cached, cached: true };
     }
 
-    if (!this.ai) return { flagged: false, category: 'CLEAN', confidence: 0, reason: 'No API key' };
+    if (!this.groqKey && !this.ai) return { flagged: false, category: 'CLEAN', confidence: 0, reason: 'No API key' };
 
-    // 2. Check Circuit Breaker & Rate Limits
     const now = Date.now();
-    if (now < this.circuitBreakerUntil) {
-      this.stats.rateLimitsAvoided++;
-      return { flagged: false, category: 'SKIPPED_CIRCUIT', confidence: 0, reason: 'AI rate limit protection active' };
-    }
-
-    // Evict timestamps older than 60s
-    this.requestTimestamps = this.requestTimestamps.filter(t => now - t < 60000);
-    if (this.requestTimestamps.length >= this.maxRpm) {
-      this.stats.rateLimitsAvoided++;
-      return { flagged: false, category: 'SKIPPED_RPM_LIMIT', confidence: 0, reason: 'AI RPM ceiling reached' };
-    }
-
-    // 3. Dispatch to Gemini 3.6 Flash
-    this.requestTimestamps.push(now);
-    this.stats.scansApiCalled++;
 
     // Ingest indexed server rules & custom directives if available
     const serverRules = guildId ? this.db.get(`rules_${guildId}`) : null;
@@ -463,69 +447,94 @@ Respond strictly in valid JSON format:
   "reason": "Clear explanation in 1 sentence"
 }`;
 
-    try {
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: `${systemPrompt}\n\nContext: ${contextInfo}\nMessage to analyze:\n"""${text.slice(0, 1000)}"""`,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.1
-        }
-      });
-
-      let rawText = (response.text || '').trim();
-      if (rawText.startsWith('```json')) {
-        rawText = rawText.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
-      } else if (rawText.startsWith('```')) {
-        rawText = rawText.replace(/^```\s*/i, '').replace(/```$/i, '').trim();
-      }
-
-      const firstBrace = rawText.indexOf('{');
-      const lastBrace = rawText.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-        rawText = rawText.substring(firstBrace, lastBrace + 1);
-      }
-
-      let parsed = {};
-      try {
-        parsed = JSON.parse(rawText);
-      } catch (parseErr) {
-        const lower = rawText.toLowerCase();
-        const isFlagged = lower.includes('"flagged": true') || lower.includes('flagged: true');
-        parsed = {
-          flagged: isFlagged,
-          category: isFlagged ? 'SUSPICIOUS_CONTENT' : 'CLEAN',
-          confidence: isFlagged ? 0.85 : 0.1,
-          reason: 'Pattern analyzed'
-        };
-      }
-
-      const verdict = {
-        flagged: Boolean(parsed.flagged),
-        category: parsed.category || 'CLEAN',
-        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (parsed.flagged ? 0.9 : 0.1),
-        reason: parsed.reason || 'Automated policy inspection',
-        cachedAt: now
-      };
-
-      // Cache verdict for 15 minutes
-      this.verdictCache.set(normalized, verdict);
-      return verdict;
-    } catch (err) {
-      const msg = String(err.message || err);
-      // If 429 RateLimit, activate circuit breaker for 60 seconds and use Groq fallback
-      if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
-        console.warn('[AI MOD] 429 Rate limit encountered, falling back to Groq');
-        this.circuitBreakerUntil = Date.now() + 60000;
-      } else {
-        console.error('[AI MOD ERROR]', err.message);
-      }
-
+    // 2. Primary Engine: Groq (qwen/qwen3.8-27b)
+    if (this.groqKey) {
       const groqVerdict = await this.analyzeWithGroq(text, systemPrompt, contextInfo, normalized, now);
-      if (groqVerdict) return groqVerdict;
-
-      return { flagged: false, category: 'ERROR', confidence: 0, reason: 'AI inspection unavailable' };
+      if (groqVerdict) {
+        this.stats.scansApiCalled++;
+        return groqVerdict;
+      }
+      console.warn('[AI MOD] Groq primary inspection failed, falling back to Gemini...');
     }
+
+    // 3. Fallback Engine: Google Gemini 3.6 Flash
+    if (this.ai) {
+      // Check Circuit Breaker & Rate Limits for Gemini
+      if (now < this.circuitBreakerUntil) {
+        this.stats.rateLimitsAvoided++;
+        return { flagged: false, category: 'SKIPPED_CIRCUIT', confidence: 0, reason: 'AI rate limit protection active' };
+      }
+
+      // Evict timestamps older than 60s
+      this.requestTimestamps = this.requestTimestamps.filter(t => now - t < 60000);
+      if (this.requestTimestamps.length >= this.maxRpm) {
+        this.stats.rateLimitsAvoided++;
+        return { flagged: false, category: 'SKIPPED_RPM_LIMIT', confidence: 0, reason: 'AI RPM ceiling reached' };
+      }
+
+      this.requestTimestamps.push(now);
+      this.stats.scansApiCalled++;
+
+      try {
+        const response = await this.ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: `${systemPrompt}\n\nContext: ${contextInfo}\nMessage to analyze:\n"""${text.slice(0, 1000)}"""`,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.1
+          }
+        });
+
+        let rawText = (response.text || '').trim();
+        if (rawText.startsWith('```json')) {
+          rawText = rawText.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+        } else if (rawText.startsWith('```')) {
+          rawText = rawText.replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+        }
+
+        const firstBrace = rawText.indexOf('{');
+        const lastBrace = rawText.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          rawText = rawText.substring(firstBrace, lastBrace + 1);
+        }
+
+        let parsed = {};
+        try {
+          parsed = JSON.parse(rawText);
+        } catch (parseErr) {
+          const lower = rawText.toLowerCase();
+          const isFlagged = lower.includes('"flagged": true') || lower.includes('flagged: true');
+          parsed = {
+            flagged: isFlagged,
+            category: isFlagged ? 'SUSPICIOUS_CONTENT' : 'CLEAN',
+            confidence: isFlagged ? 0.85 : 0.1,
+            reason: 'Pattern analyzed'
+          };
+        }
+
+        const verdict = {
+          flagged: Boolean(parsed.flagged),
+          category: parsed.category || 'CLEAN',
+          confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (parsed.flagged ? 0.9 : 0.1),
+          reason: parsed.reason || 'Automated policy inspection',
+          cachedAt: now
+        };
+
+        // Cache verdict for 15 minutes
+        this.verdictCache.set(normalized, verdict);
+        return verdict;
+      } catch (err) {
+        const msg = String(err.message || err);
+        if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
+          console.warn('[AI MOD] 429 Rate limit encountered on Gemini fallback');
+          this.circuitBreakerUntil = Date.now() + 60000;
+        } else {
+          console.error('[AI MOD GEMINI FALLBACK ERROR]', err.message);
+        }
+      }
+    }
+
+    return { flagged: false, category: 'ERROR', confidence: 0, reason: 'AI inspection unavailable' };
   }
 
   async analyzeWithGroq(text, systemPrompt, contextInfo, normalized, now) {
