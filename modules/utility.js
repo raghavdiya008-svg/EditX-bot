@@ -1398,11 +1398,12 @@ class UtilityModule {
     const serverIcon = (guild?.iconURL && typeof guild.iconURL === 'function') ? guild.iconURL({ dynamic: true }) : null;
     const username = member.user?.username || member.displayName || 'Member';
 
-    // Discover server navigation channels dynamically
+    // Discover server navigation channels dynamically (Ignore private bot channels like bot-rules, bot-memory)
     const chanList = guild?.channels?.cache ? Array.from(guild.channels.cache.values()).filter(Boolean) : [];
-    const rolesChan = chanList.find(c => c.name && (c.name.includes('get-roles') || c.name.includes('role') || c.name.includes('verify'))) || null;
-    const rulesChan = chanList.find(c => c.name && (c.name.includes('rule') || c.name.includes('guideline'))) || null;
-    const chatChan = chanList.find(c => c.name && (c.name.includes('general') || c.name.includes('chat') || c.name.includes('lounge') || c.name.includes('discussion'))) || null;
+    const publicChans = chanList.filter(c => !c.name?.includes('bot-'));
+    const rolesChan = publicChans.find(c => c.name && (c.name.includes('get-roles') || c.name.includes('roles'))) || null;
+    const rulesChan = publicChans.find(c => c.name && (c.name.includes('rules-guidelines') || c.name.includes('rules') || c.name.includes('guidelines'))) || null;
+    const chatChan = publicChans.find(c => c.name && (c.name.includes('general-chat') || c.name.includes('general') || c.name.includes('chat') || c.name.includes('lounge'))) || null;
 
     const navLines = [];
     if (rolesChan) navLines.push(`▸ 🎭 **Select Roles** ➔ <#${rolesChan.id}>`);
@@ -1744,33 +1745,18 @@ class UtilityModule {
     }
 
     if (channel && welcomerConfig.enabled !== false) {
-      let sent = false;
+      const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join', inviterInfo);
 
-      // 1. Try Canvas Graphic Card + Modern Swiss/OLED Welcome Embed
-      if (welcomerConfig.cardEnabled !== false) {
-        try {
-          const cardBuffer = await this.generateCard(member, welcomerConfig.theme || 'dark', 'join');
-          const attachment = new AttachmentBuilder(cardBuffer, { name: 'welcome.png' });
-          const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join', inviterInfo);
-          const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join', inviterInfo);
-          await channel.send({ content: textMsg, embeds: [embed], files: [attachment] });
-          sent = true;
-        } catch (cardErr) {
-          console.warn('[WELCOMER] Canvas card failed, using embed fallback:', cardErr.message);
-        }
-      }
-
-      // 2. Clean Embed Fallback
-      if (!sent) {
+      // Simple, clean copy-paste welcome message by default (Matches user requirement)
+      if (welcomerConfig.useEmbed) {
         try {
           const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join', inviterInfo);
-          embed.setImage(null);
-          const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join', inviterInfo);
           await channel.send({ content: textMsg, embeds: [embed] });
-          sent = true;
-        } catch (textErr) {
-          console.error(`[WELCOMER ERROR] Failed to send welcome message in #${channel.name}:`, textErr.message);
+        } catch (_) {
+          await channel.send({ content: textMsg }).catch(() => {});
         }
+      } else {
+        await channel.send({ content: textMsg }).catch(() => {});
       }
     }
   }
