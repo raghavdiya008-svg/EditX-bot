@@ -257,20 +257,20 @@ class QuickSetupModule {
 
         // Post warning embed in the honeypot channel
         const warningEmbed = new EmbedBuilder()
-          .setColor(0xFF0000)
-          .setTitle('🍯 ANTI-USERBOT HONEYPOT TRAP')
+          .setColor(0xDC2626)
+          .setTitle('🚨・AUTOMATED SECURITY HONEYPOT TRAP')
           .setDescription(
-            `**⛔ DO NOT SEND MESSAGES HERE**\n\n` +
-            `This channel is an automated anti-rogue-userbot trap.\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `▸ **Any message sent here** → Instant **Permanent Ban**\n` +
-            `▸ **Any reaction added here** → Instant **Permanent Ban**\n` +
-            `▸ **Bots, self-bots, and userbots** are the targets\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `🛡️ *All honeypot bans are logged to #modlogs with full details.*\n` +
-            `⚠️ *Administrators and server owner are exempt.*`
+            `**DO NOT SEND ANY MESSAGES OR REACTIONS IN THIS CHANNEL.**\n\n` +
+            `This channel is an automated security trap designed to detect raid bots, token scrapers, and rogue user accounts.\n\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `⚡ **AUTOMATIC ENFORCEMENT & PENALTY:**\n` +
+            `▸ **Role Stripping**: All Member and Community roles are immediately stripped from your account.\n` +
+            `▸ **Incident Dispatch**: An instant security report card with 1-click mod action buttons is sent to staff in alerts.\n` +
+            `▸ **Message Expunged**: Your message is automatically deleted on entry.\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `💬 *If you are a human member, please chat in community channels instead!*`
           )
-          .setFooter({ text: `${guild.name} • Auto-Security System • Powered by EditX` })
+          .setFooter({ text: `${guild.name} • Honeypot Sentinel • Automated Security` })
           .setTimestamp();
 
         await honeypotChan.send({ embeds: [warningEmbed] }).catch(() => {});
@@ -524,22 +524,22 @@ class QuickSetupModule {
       currentSec.honeypotChannelId = targetChannel.id;
       secDb.set(guild.id, currentSec);
 
-      // Post scary warning embed into the honeypot channel
+      // Post warning embed into the honeypot channel
       const hpWarnEmbed = new EmbedBuilder()
-        .setColor(0xFF0000)
-        .setTitle('🍯 ANTI-USERBOT HONEYPOT TRAP')
+        .setColor(0xDC2626)
+        .setTitle('🚨・AUTOMATED SECURITY HONEYPOT TRAP')
         .setDescription(
-          `**⛔ DO NOT SEND MESSAGES HERE**\n\n` +
-          `This channel is an automated anti-rogue-userbot trap.\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `▸ **Any message sent here** → Instant **Permanent Ban**\n` +
-          `▸ **Any reaction added here** → Instant **Permanent Ban**\n` +
-          `▸ **Bots, self-bots, and userbots** are the targets\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `🛡️ *All honeypot bans are logged to #modlogs with full details.*\n` +
-          `⚠️ *Administrators and server owner are exempt.*`
+          `**DO NOT SEND ANY MESSAGES OR REACTIONS IN THIS CHANNEL.**\n\n` +
+          `This channel is an automated security trap designed to detect raid bots, token scrapers, and rogue user accounts.\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `⚡ **AUTOMATIC ENFORCEMENT & PENALTY:**\n` +
+          `▸ **Role Stripping**: All Member and Community roles are immediately stripped from your account.\n` +
+          `▸ **Incident Dispatch**: An instant security report card with 1-click mod action buttons is sent to staff in alerts.\n` +
+          `▸ **Message Expunged**: Your message is automatically deleted on entry.\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `💬 *If you are a human member, please chat in community channels instead!*`
         )
-        .setFooter({ text: `${guild.name} • Auto-Security System • Powered by EditX` })
+        .setFooter({ text: `${guild.name} • Honeypot Sentinel • Automated Security` })
         .setTimestamp();
 
       await targetChannel.send({ embeds: [hpWarnEmbed] }).catch(() => {});
@@ -854,7 +854,7 @@ class QuickSetupModule {
     const clientRole = findRole('1538964392337612931', 'client');
 
     const profEmbed = new EmbedBuilder()
-      .setColor(0x9B59B6)
+      .setColor(0x06B6D4)
       .setTitle('🎨・CREATIVE DISCIPLINES & PROFESSIONS')
       .setDescription(
         `Select your primary creative disciplines to display your specialty on your server profile, appear in creator directories, and receive commission inquiries:\n\n` +
@@ -907,7 +907,7 @@ class QuickSetupModule {
     });
 
     const softEmbed = new EmbedBuilder()
-      .setColor(0x3498DB)
+      .setColor(0x0284C7)
       .setTitle('⚡・CREATIVE SOFTWARE & TOOLS')
       .setDescription(
         `Select your editing and design software suite to let collaborators and clients know which toolsets you use:\n\n` +
@@ -954,7 +954,7 @@ class QuickSetupModule {
     });
 
     const pingEmbed = new EmbedBuilder()
-      .setColor(0xF1C40F)
+      .setColor(0xF59E0B)
       .setTitle('🔔・SERVER NOTIFICATION PREFERENCES')
       .setDescription(
         `Customize your community notifications and alert preferences:\n\n` +
