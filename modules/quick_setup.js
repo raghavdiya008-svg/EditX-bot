@@ -6,8 +6,10 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  StringSelectMenuBuilder
+  StringSelectMenuBuilder,
+  AttachmentBuilder
 } = require('discord.js');
+const { createHoneypotBanner } = require('./banner_generator');
 
 class QuickSetupModule {
   constructor(client, db) {
@@ -255,25 +257,36 @@ class QuickSetupModule {
         currentSec.honeypotChannelId = honeypotChan.id;
         secDb.set(guild.id, currentSec);
 
+        let bannerBuffer;
+        try { bannerBuffer = createHoneypotBanner(); } catch (_) {}
+        const files = bannerBuffer ? [new AttachmentBuilder(bannerBuffer, { name: 'honeypot_banner.png' })] : [];
+
         // Post warning embed in the honeypot channel
         const warningEmbed = new EmbedBuilder()
           .setColor(0xDC2626)
           .setTitle('🚨・AUTOMATED SECURITY HONEYPOT TRAP')
           .setDescription(
-            `**DO NOT SEND ANY MESSAGES OR REACTIONS IN THIS CHANNEL.**\n\n` +
-            `This channel is an automated security trap designed to detect raid bots, token scrapers, and rogue user accounts.\n\n` +
+            `### ⚠️ ZERO-TOLERANCE SECURITY PERIMETER\n\n` +
+            `> This channel is an automated containment perimeter engineered to detect raid scripts, token scrapers, rogue userbots, and unauthorized automated accounts.\n\n` +
+            `\`\`\`ansi\n` +
+            `\u001b[1;31m[STATUS: ARMED & ENFORCING]\u001b[0m \u001b[0;37mEditX Sentinel Defense Engine\u001b[0m\n` +
+            `\`\`\`\n` +
+            `### ⚡ AUTOMATIC ENFORCEMENT & PENALTY\n` +
+            `┌─ 🔨 **Role Stripping**\n` +
+            `│   \`All verified Member and Community roles are immediately stripped from your profile.\`\n` +
+            `├─ 🚨 **Staff Incident Dispatch**\n` +
+            `│   \`An instant security report card with 1-click mod action buttons is sent to staff in alerts.\`\n` +
+            `└─ 🗑️ **Immediate Message Purge**\n` +
+            `    \`Your message is instantly scrubbed on entry with zero delay.\`\n\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `⚡ **AUTOMATIC ENFORCEMENT & PENALTY:**\n` +
-            `▸ **Role Stripping**: All Member and Community roles are immediately stripped from your account.\n` +
-            `▸ **Incident Dispatch**: An instant security report card with 1-click mod action buttons is sent to staff in alerts.\n` +
-            `▸ **Message Expunged**: Your message is automatically deleted on entry.\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-            `💬 *If you are a human member, please chat in community channels instead!*`
+            `-# 💬 **Human Creators & Members:** Please chat in community discussion channels instead!`
           )
           .setFooter({ text: `${guild.name} • Honeypot Sentinel • Automated Security` })
           .setTimestamp();
 
-        await honeypotChan.send({ embeds: [warningEmbed] }).catch(() => {});
+        if (bannerBuffer) warningEmbed.setImage('attachment://honeypot_banner.png');
+
+        await honeypotChan.send({ embeds: [warningEmbed], files }).catch(() => {});
 
         results.honeypot = `🟢 Armed in <#${honeypotChan.id}> (Auto-bans rogue userbots & spam accounts • Warning embed posted)`;
       } catch (err) {
@@ -524,25 +537,36 @@ class QuickSetupModule {
       currentSec.honeypotChannelId = targetChannel.id;
       secDb.set(guild.id, currentSec);
 
+      let bannerBuffer;
+      try { bannerBuffer = createHoneypotBanner(); } catch (_) {}
+      const files = bannerBuffer ? [new AttachmentBuilder(bannerBuffer, { name: 'honeypot_banner.png' })] : [];
+
       // Post warning embed into the honeypot channel
       const hpWarnEmbed = new EmbedBuilder()
         .setColor(0xDC2626)
         .setTitle('🚨・AUTOMATED SECURITY HONEYPOT TRAP')
         .setDescription(
-          `**DO NOT SEND ANY MESSAGES OR REACTIONS IN THIS CHANNEL.**\n\n` +
-          `This channel is an automated security trap designed to detect raid bots, token scrapers, and rogue user accounts.\n\n` +
+          `### ⚠️ ZERO-TOLERANCE SECURITY PERIMETER\n\n` +
+          `> This channel is an automated containment perimeter engineered to detect raid scripts, token scrapers, rogue userbots, and unauthorized automated accounts.\n\n` +
+          `\`\`\`ansi\n` +
+          `\u001b[1;31m[STATUS: ARMED & ENFORCING]\u001b[0m \u001b[0;37mEditX Sentinel Defense Engine\u001b[0m\n` +
+          `\`\`\`\n` +
+          `### ⚡ AUTOMATIC ENFORCEMENT & PENALTY\n` +
+          `┌─ 🔨 **Role Stripping**\n` +
+          `│   \`All verified Member and Community roles are immediately stripped from your profile.\`\n` +
+          `├─ 🚨 **Staff Incident Dispatch**\n` +
+          `│   \`An instant security report card with 1-click mod action buttons is sent to staff in alerts.\`\n` +
+          `└─ 🗑️ **Immediate Message Purge**\n` +
+          `    \`Your message is instantly scrubbed on entry with zero delay.\`\n\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `⚡ **AUTOMATIC ENFORCEMENT & PENALTY:**\n` +
-          `▸ **Role Stripping**: All Member and Community roles are immediately stripped from your account.\n` +
-          `▸ **Incident Dispatch**: An instant security report card with 1-click mod action buttons is sent to staff in alerts.\n` +
-          `▸ **Message Expunged**: Your message is automatically deleted on entry.\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-          `💬 *If you are a human member, please chat in community channels instead!*`
+          `-# 💬 **Human Creators & Members:** Please chat in community discussion channels instead!`
         )
         .setFooter({ text: `${guild.name} • Honeypot Sentinel • Automated Security` })
         .setTimestamp();
 
-      await targetChannel.send({ embeds: [hpWarnEmbed] }).catch(() => {});
+      if (bannerBuffer) hpWarnEmbed.setImage('attachment://honeypot_banner.png');
+
+      await targetChannel.send({ embeds: [hpWarnEmbed], files }).catch(() => {});
 
       return interaction.reply({
         content: `🍯 **Honeypot Trap Armed in <#${targetChannel.id}>!**\n▸ Warning embed posted in the channel.\n▸ Any non-admin account sending a message or adding a reaction will be **instantly banned** and logged to #modlogs.`,
