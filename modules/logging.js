@@ -101,23 +101,37 @@ class LoggingModule {
   }
 
   async handleMessageDelete(message) {
-    if (!message.guild || message.author?.bot) return;
+    if (!message || !message.guild) return;
+
+    if (message.partial) {
+      try { message = await message.fetch(); } catch {}
+    }
+
+    if (message.author?.bot) return;
+
     const logChannel = await this.getLogChannel(message.guild, 'messages');
     if (!logChannel) return;
 
-    const authorTag = message.author ? message.author.tag : 'Unknown / Uncached Member';
+    // Never log deletions happening inside the log channel itself or system bot channels
+    if (message.channel?.id === logChannel.id || /bot-(memory|rules)/i.test(message.channel?.name || '')) return;
+
+    const content = (message.content || '').trim();
+    const hasAttachments = Boolean(message.attachments && message.attachments.size > 0);
+    if (!content && !hasAttachments) return;
+
+    const authorTag = message.author ? message.author.tag : 'Unknown Member';
     const authorAvatar = message.author ? message.author.displayAvatarURL() : null;
     const authorMention = message.author ? `<@${message.author.id}>` : 'Unknown';
 
-    const hasMentions = (message.mentions.users.size > 0 || message.mentions.roles.size > 0) && (Date.now() - message.createdTimestamp < 3 * 60 * 1000);
-    const mentionedUsers = message.mentions.users.map(u => `<@${u.id}>`).join(' ');
-    const mentionedRoles = message.mentions.roles.map(r => `<@&${r.id}>`).join(' ');
+    const hasMentions = (message.mentions?.users?.size > 0 || message.mentions?.roles?.size > 0) && (Date.now() - (message.createdTimestamp || 0) < 3 * 60 * 1000);
+    const mentionedUsers = message.mentions?.users ? message.mentions.users.map(u => `<@${u.id}>`).join(' ') : '';
+    const mentionedRoles = message.mentions?.roles ? message.mentions.roles.map(r => `<@&${r.id}>`).join(' ') : '';
 
     const embed = new EmbedBuilder()
       .setColor(hasMentions ? 0xFF0000 : 0xED4245)
       .setTitle(hasMentions ? '👻 Ghost Ping / Deleted Mention' : '🗑️ Message Deleted')
       .setAuthor({ name: authorTag, iconURL: authorAvatar })
-      .setDescription(`**Message by ${authorMention} deleted in <#${message.channel.id}>**\n${message.content || '*[No text content / embed or attachment]*'}`)
+      .setDescription(`**Message by ${authorMention} deleted in <#${message.channel.id}>**\n${content || '*[Attachment only]*'}`)
       .setTimestamp();
 
     if (hasMentions) {
@@ -129,21 +143,46 @@ class LoggingModule {
   }
 
   async handleMessageUpdate(oldMessage, newMessage) {
-    if (!oldMessage.guild || oldMessage.author?.bot) return;
-    if (oldMessage.content === newMessage.content) return;
+    if (!oldMessage || !oldMessage.guild) return;
+
+    // Fetch partials if available
+    if (oldMessage.partial) {
+      try { oldMessage = await oldMessage.fetch(); } catch {}
+    }
+    if (newMessage.partial) {
+      try { newMessage = await newMessage.fetch(); } catch {}
+    }
+
+    // Ignore bots completely
+    if (oldMessage.author?.bot || newMessage.author?.bot) return;
+
+    // Must have a known user author
+    const author = newMessage.author || oldMessage.author;
+    if (!author) return;
+
+    const oldText = (oldMessage.content || '').trim();
+    const newText = (newMessage.content || '').trim();
+
+    // If both are empty (e.g. embed preview loaded, pin, reactions), or text didn't change, do not log!
+    if (!oldText && !newText) return;
+    if (oldText === newText) return;
+
     const logChannel = await this.getLogChannel(oldMessage.guild, 'messages');
     if (!logChannel) return;
 
-    const authorTag = oldMessage.author ? oldMessage.author.tag : 'Unknown Member';
-    const authorAvatar = oldMessage.author ? oldMessage.author.displayAvatarURL() : null;
+    // Never log edits inside log channels or system channels!
+    if (oldMessage.channel?.id === logChannel.id || /bot-(memory|rules)/i.test(oldMessage.channel?.name || '')) return;
+
+    const authorTag = author.tag || author.username || 'Unknown Member';
+    const authorAvatar = typeof author.displayAvatarURL === 'function' ? author.displayAvatarURL() : null;
 
     const embed = new EmbedBuilder().setColor(0xFEE75C)
       .setTitle('✏️ Message Edited')
       .setAuthor({ name: authorTag, iconURL: authorAvatar })
       .setDescription(`**Message edited in <#${oldMessage.channel.id}>** [Jump to Message](${newMessage.url})`)
       .addFields(
-        { name: 'Before', value: (oldMessage.content || '*[No content]*').slice(0, 1024), inline: false },
-        { name: 'After', value: (newMessage.content || '*[No content]*').slice(0, 1024), inline: false }
+        { name: 'Before', value: oldText ? oldText.slice(0, 1024) : '*[No content]*', inline: false },
+        { name: 'After', value: newText ? newText.slice(0, 1024) : '*[No content]*', inline: false }
       )
       .setTimestamp();
 
