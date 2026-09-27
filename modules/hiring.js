@@ -490,8 +490,8 @@ class HiringModule {
     const forHireChanId = this.db?.get ? this.db.get(`forhire_chan_${guildId}`) : null;
 
     const chanName = (message.channel?.name || '').toLowerCase();
-    const isHiring = (hiringChanId && message.channel?.id === hiringChanId) || chanName.includes('hiring') || chanName.includes('job-postings');
-    const isForHire = (forHireChanId && message.channel?.id === forHireChanId) || chanName.includes('for-hire') || chanName.includes('hireable') || chanName.includes('freelance');
+    const isHiring = (hiringChanId && message.channel?.id === hiringChanId) || chanName.includes('hiring') || chanName.includes('job-postings') || chanName.includes('job-board');
+    const isForHire = (forHireChanId && message.channel?.id === forHireChanId) || chanName.includes('for-hire') || chanName.includes('hireable') || chanName.includes('freelance') || chanName.includes('portfolios');
 
     if (!isHiring && !isForHire) return;
 
