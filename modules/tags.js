@@ -72,37 +72,20 @@ class TagsModule {
 
   buildStickyPayload(stickyData, channel, guild) {
     const themeColors = {
-      stealth: 0x0F172A,
-      indigo: 0x0284C7,
+      stealth: 0x334155,
+      indigo: 0x38BDF8,
       cyan: 0x06B6D4,
       gold: 0xF59E0B,
       emerald: 0x10B981,
-      rose: 0xDC2626
+      rose: 0xF43F5E
     };
     const color = themeColors[stickyData.theme] || 0x06B6D4;
-    const channelName = channel?.name || 'channel';
-    const rawTitle = stickyData.title || `#${channelName.toUpperCase()} NOTICE`;
-    const cleanTitle = rawTitle.replace(/^📌[・\s]*/, '');
+    const content = (stickyData.content || '').trim();
 
+    // Ultra-slim, single-strip sticky embed: focuses 100% on the message so normal chat view is not blocked
     const embed = new EmbedBuilder()
       .setColor(color)
-      .setTitle(`📌・${cleanTitle}`)
-      .setDescription(
-        `### ⚠️ CHANNEL DIRECTIVE & MODERATION NOTICE\n\n` +
-        `> **${stickyData.content}**\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `-# 📌 Automatically maintained at the bottom of #${channelName} • Please respect community directives.`
-      )
-      .setFooter({
-        text: `${guild?.name || 'EDITX'} • Persistent Channel Directive`,
-        iconURL: (guild?.iconURL && typeof guild.iconURL === 'function') ? guild.iconURL({ dynamic: true }) : undefined
-      })
-      .setTimestamp();
-
-    if (guild?.iconURL && typeof guild.iconURL === 'function') {
-      const gIcon = guild.iconURL({ dynamic: true, size: 128 });
-      if (gIcon) embed.setThumbnail(gIcon);
-    }
+      .setDescription(`📌 **${content}**`);
 
     const components = [];
     if (stickyData.buttonLabel && stickyData.buttonUrl) {

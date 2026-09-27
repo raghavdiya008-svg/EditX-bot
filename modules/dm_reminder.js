@@ -821,8 +821,128 @@ class DMReminderModule {
         return true;
       }
     }
-
     return false;
+  }
+
+  /**
+   * Dispatches a Direct Message to a user when pinged by staff
+   * Supports:
+   * - "@EditX dm @user <message>"
+   * - "@EditX dm this person <message>" (when replying to a user's message)
+   * - "@EditX say dm this person this msg: <message>"
+   * - "!dm @user <message>"
+   */
+  async handleDmDispatchCommand(message) {
+    if (!message.guild || message.author.bot || !message.content) return false;
+
+    const botId = this.client.user?.id;
+    if (!botId) return false;
+
+    const raw = message.content.trim();
+    const isBotMentioned = message.mentions?.has?.(botId) ||
+      raw.startsWith(`<@${botId}>`) ||
+      raw.startsWith(`<@!${botId}>`);
+    const isPrefixDm = /^[!/](dm|pm)\b/i.test(raw);
+
+    if (!isBotMentioned && !isPrefixDm) return false;
+
+    // Check if command is asking to DM someone
+    const isDmIntent = isPrefixDm ||
+      /\b(dm|direct\s*message|pm|send\s*dm|message|tell)\b/i.test(raw);
+    if (!isDmIntent) return false;
+
+    // Authorization check: Staff, Moderator, Admin, Server Owner, or Bot Owner
+    const isAuthorized = message.author.id === '1320083615475830797' ||
+      message.author.id === message.guild?.ownerId ||
+      Boolean(message.member?.permissions?.has?.(PermissionFlagsBits.Administrator)) ||
+      Boolean(message.member?.permissions?.has?.(PermissionFlagsBits.ManageMessages)) ||
+      Boolean(message.member?.roles?.cache && Array.from(message.member.roles.cache.values()).some(r => (r.position || 0) > 27));
+
+    if (!isAuthorized) {
+      await message.reply({ content: '❌ Only server staff and administrators can request DM dispatches.' }).catch(() => {});
+      return true;
+    }
+
+    let text = raw.replace(new RegExp(`<@!?${botId}>`, 'g'), '').trim();
+
+    // 1. Resolve Target User
+    let targetUser = null;
+    if (message.mentions?.users?.size > 0) {
+      targetUser = Array.from(message.mentions.users.values()).find(u => u.id !== botId);
+    }
+
+    // Check if replying to someone's message in chat
+    if (!targetUser && message.reference && message.reference.messageId) {
+      try {
+        const refMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+        if (refMsg && refMsg.author && !refMsg.author.bot) {
+          targetUser = refMsg.author;
+        }
+      } catch (rErr) {}
+    }
+
+    // Check if a Discord user ID was given in the message (17-20 digits)
+    if (!targetUser) {
+      const idMatch = text.match(/\b(\d{17,20})\b/);
+      if (idMatch && idMatch[1] !== botId) {
+        targetUser = await this.client.users.fetch(idMatch[1]).catch(() => null);
+      }
+    }
+
+    if (!targetUser) {
+      await message.reply({
+        content: `⚠️ **Target user not found.** Please mention the user or reply to their message.\n> *Example:* \`@${this.client.user?.username || 'EditX'} dm @user Your message here\` or reply to a message with \`@${this.client.user?.username || 'EditX'} dm this person Your message here\``
+      }).catch(() => {});
+      return true;
+    }
+
+    // 2. Extract Message Text
+    // Remove target mention or ID
+    text = text.replace(new RegExp(`<@!?${targetUser.id}>`, 'g'), '').trim();
+    text = text.replace(new RegExp(`\\b${targetUser.id}\\b`, 'g'), '').trim();
+
+    // Remove trigger words
+    text = text.replace(/^[!/](dm|pm)\s*/i, '');
+    text = text.replace(/^(say\s+)?(please\s+)?(can\s+you\s+)?(send\s+a\s+|send\s+)?(dm|direct\s*message|pm|message|tell)\s+(this\s+person|this\s+user|him|her|them|to\s+this\s+person|to\s+this\s+user|to)?\s*(that|this\s+msg\s*:?|this\s+message\s*:?|saying\s*:?|msg\s*:?)?/i, '');
+    text = text.replace(/^(\s*and)?\s*say\s+/i, '');
+    text = text.replace(/^[:\-\s"'>]+/, '').replace(/["'>\s]+$/, '').trim();
+
+    if (!text) {
+      await message.reply({
+        content: `⚠️ **Please specify the message to send.**\n> *Example:* \`@${this.client.user?.username || 'EditX'} dm <@${targetUser.id}> Hello! Please check your support ticket.\``
+      }).catch(() => {});
+      return true;
+    }
+
+    // 3. Send DM to Target User
+    try {
+      const dmEmbed = new EmbedBuilder()
+        .setColor(0x06B6D4)
+        .setAuthor({
+          name: `${message.guild.name} • Official Direct Message`,
+          iconURL: (message.guild.iconURL && typeof message.guild.iconURL === 'function') ? message.guild.iconURL({ dynamic: true }) : undefined
+        })
+        .setDescription(
+          `### 📩 Direct Message from Staff\n\n` +
+          `> **${text}**\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `-# 💬 You can reply directly in this DM to contact server staff • Sent by <@${message.author.id}> from #${message.channel.name}`
+        )
+        .setFooter({ text: `${message.guild.name} Support & Staff Desk` })
+        .setTimestamp();
+
+      await targetUser.send({ embeds: [dmEmbed] });
+
+      await message.reply({
+        content: `✅ **Direct message delivered to <@${targetUser.id}> (\`${targetUser.tag || targetUser.username}\`)!**\n> "${text.slice(0, 150)}${text.length > 150 ? '...' : ''}"`
+      }).catch(() => {});
+      return true;
+    } catch (dmErr) {
+      await message.reply({
+        content: `❌ **Could not deliver DM to <@${targetUser.id}>.** Their direct messages are disabled or they have blocked bot DMs.`
+      }).catch(() => {});
+      return true;
+    }
   }
 
   async handleCommand(interaction) {

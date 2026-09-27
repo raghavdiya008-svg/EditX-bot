@@ -256,6 +256,10 @@ client.on(Events.MessageCreate, async (message) => {
   const handledReportReply = await dmReminder.handleGuildMessage(message);
   if (handledReportReply) return;
 
+  // Staff Mention / Prefix DM Dispatcher (e.g. "@EditX dm @user <msg>" or replying "@EditX dm this person <msg>")
+  const handledDmDispatch = await dmReminder.handleDmDispatchCommand(message);
+  if (handledDmDispatch) return;
+
   // --- Owner & Admin Plain-Text Command Dispatcher ---
   // Guarantees Bot Owner (1320083615475830797) can run commands even if Discord hides slash commands!
   const isBotOwner = message.author.id === BOT_OWNER_ID;
@@ -356,6 +360,40 @@ client.on(Events.MessageCreate, async (message) => {
         if (waitMsg) await waitMsg.edit(res).catch(() => {});
         return;
       }
+      if (sub === 'list') {
+        const directives = botMemory.getDirectivesList(message.guild.id);
+        if (!directives || directives.length === 0) {
+          return message.reply('📭 **No custom rules currently active in server memory.**\nUse `!rules add <rule>` to add one.').catch(() => {});
+        }
+        const formatted = directives.map((d, i) => `**${i + 1}.** ${d}`).join('\n\n');
+        const embed = new EmbedBuilder()
+          .setColor(0x5865F2)
+          .setTitle(`📋 Custom Bot Rules & Directives • ${message.guild.name} (${directives.length})`)
+          .setDescription(formatted)
+          .setFooter({ text: 'To delete a rule, use !rules remove <number> (e.g. !rules remove 1)' })
+          .setTimestamp();
+        return message.reply({ embeds: [embed] }).catch(() => {});
+      }
+      if (sub === 'remove' || sub === 'delete' || sub === 'rm') {
+        const target = args.slice(1).join(' ').trim();
+        if (!target) {
+          return message.reply('⚠️ Please specify rule number or keyword to remove. Example: `!rules remove 1`. Use `!rules list` to see rule numbers.').catch(() => {});
+        }
+        const res = await botMemory.removeDirective(message.guild, target);
+        if (res.success) {
+          return message.reply(`✅ **Rule Removed!**\n• Removed: "${res.removed}"\n• Remaining Rules: \`${res.remainingCount}\``).catch(() => {});
+        } else {
+          return message.reply(`❌ **Failed to remove rule:** ${res.error}`).catch(() => {});
+        }
+      }
+      if (sub === 'clear') {
+        const res = await botMemory.removeDirective(message.guild, 'all');
+        if (res.success) {
+          return message.reply(`✅ **All custom rules cleared from memory!**`).catch(() => {});
+        } else {
+          return message.reply(`❌ **Failed to clear directives:** ${res.error}`).catch(() => {});
+        }
+      }
       if (sub === 'add') {
         const instruction = args.slice(1).join(' ').trim();
         if (!instruction) {
@@ -451,6 +489,10 @@ client.on(Events.MessageCreate, async (message) => {
   // 1. Honeypot Trap: unauthorized accounts speaking in honeypot are softbanned immediately
   const isHoneypot = await moderation.checkHoneypot(message);
   if (isHoneypot) return;
+
+  // 1b. Self-Promotion Restriction: other than #self-promotions, member-tier promos are deleted with redirect reply
+  const isBlockedPromo = await moderation.checkPromoRestriction(message);
+  if (isBlockedPromo) return;
 
   // 2. AI Moderation & Security Sentinel (Sliding context, instant phishing detection, jailbreak guard & mod copilot)
   const allowed = await aiModerator.checkMessage(message);

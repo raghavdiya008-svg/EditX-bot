@@ -1363,6 +1363,89 @@ class ModerationModule {
     return true;
   }
 
+  /**
+   * Enforces Self-Promotion Channel Directives:
+   * "Other than #self-promotions, if anyone whose highest role is a member role
+   * posts promo of anything, reply 'no promo in this channel use the #self-promotions channel only'
+   * and delete that message."
+   */
+  async checkPromoRestriction(message) {
+    if (!message.guild || message.author?.bot || !message.member) return false;
+
+    // 1. Channel check: If in #self-promotions, allowed!
+    const promoChan = message.guild.channels?.cache?.find?.(c => c.name && c.name.includes('self-promotions'));
+    const promoChanId = promoChan?.id || '1540409739236745378';
+    if (message.channel.id === promoChanId || (message.channel.name && message.channel.name.includes('self-promotions'))) {
+      return false;
+    }
+
+    // 2. Role check: "if anyone whose highest role is a member role"
+    // Staff/Moderator/Admin roles: 👑 Admin (30), 🛡️ Moderator (29), 🛡️ Staff (28) or have permissions
+    const member = message.member;
+    const isStaffOrAdmin = Boolean(
+      member.permissions?.has?.(PermissionFlagsBits.Administrator) ||
+      member.permissions?.has?.(PermissionFlagsBits.ManageMessages) ||
+      member.permissions?.has?.(PermissionFlagsBits.ModerateMembers) ||
+      (member.roles?.highest && member.roles.highest.position > 27) ||
+      (message.author.id === message.guild.ownerId) ||
+      (message.author.id === '1320083615475830797')
+    );
+
+    if (isStaffOrAdmin) return false;
+
+    // 3. Promo content detection
+    const text = message.content || '';
+    const PROMO_REGEX = new RegExp([
+      'https?:\\/\\/(www\\.)?(youtube\\.com|youtu\\.be|twitch\\.tv|tiktok\\.com|instagram\\.com|twitter\\.com|x\\.com|t\\.me|linktr\\.ee|bento\\.me|carrd\\.co|beacons\\.ai)',
+      'discord(\\.(gg|io|me|li)|\\.com\\/invite)\\/.+',
+      '\\b(promo|promotion|self-?promo|advertise|advertising)\\b',
+      '\\b(check out my|sub to my|subscribe to my|follow my|join my|join our)\\b',
+      '\\b(my (youtube|channel|stream|server|tiktok|ig|instagram|discord|portfolio))\\b',
+      '\\b(dm for (edits|prices|work|commissions?|hire)|commissions? open|for hire|hire me)\\b',
+      '\\b(buy my|selling my|selling presets?|cheap edits?|paid edits?)\\b'
+    ].join('|'), 'i');
+
+    const isPromo = PROMO_REGEX.test(text);
+    if (!isPromo) return false;
+
+    // 4. Action: Reply "no promo in this channel use the #self-promotions channel only" and delete message
+    try {
+      let warnMsg = null;
+      if (typeof message.reply === 'function') {
+        warnMsg = await message.reply({
+          content: `no promo in this channel use the <#${promoChanId}> channel only`
+        }).catch(async () => {
+          if (message.channel && typeof message.channel.send === 'function') {
+            return await message.channel.send({
+              content: `<@${message.author.id}>, no promo in this channel use the <#${promoChanId}> channel only`
+            }).catch(() => null);
+          }
+          return null;
+        });
+      } else if (message.channel && typeof message.channel.send === 'function') {
+        warnMsg = await message.channel.send({
+          content: `<@${message.author.id}>, no promo in this channel use the <#${promoChanId}> channel only`
+        }).catch(() => null);
+      }
+
+      if (typeof message.delete === 'function') {
+        await message.delete().catch(() => {});
+      }
+
+      // Auto-clean warning after 10s so normal chat view is preserved
+      if (warnMsg && typeof warnMsg.delete === 'function') {
+        setTimeout(() => {
+          warnMsg.delete().catch(() => {});
+        }, 10000);
+      }
+
+      return true;
+    } catch (err) {
+      console.error('[PROMO RESTRICTION ERROR]', err.message);
+      return false;
+    }
+  }
+
   async punish(message, reason, action, durationMs = 0) {
     try {
       const guild = message.guild;

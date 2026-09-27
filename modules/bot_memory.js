@@ -66,6 +66,13 @@ class BotMemoryModule {
             .setDescription('Add a new custom rule/directive for the bot to strictly obey')
             .addStringOption(o => o.setName('rule').setDescription('The rule text').setRequired(true))
         )
+        .addSubcommand(s =>
+          s.setName('remove')
+            .setDescription('Remove a custom rule/directive by its number or text')
+            .addIntegerOption(o => o.setName('rule_number').setDescription('Rule number to remove (from /rules list)').setMinValue(1))
+            .addStringOption(o => o.setName('query').setDescription('Keyword or text of rule to remove'))
+            .addBooleanOption(o => o.setName('clear_all').setDescription('Delete all custom rules'))
+        )
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .setDMPermission(false),
 
@@ -84,6 +91,17 @@ class BotMemoryModule {
         .setDescription('Manage and synchronize server community rules')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .setDMPermission(false)
+        .addSubcommand(s =>
+          s.setName('list')
+            .setDescription('List all custom live directives with rule numbers')
+        )
+        .addSubcommand(s =>
+          s.setName('remove')
+            .setDescription('Remove a custom rule by its number, keyword, or clear all')
+            .addIntegerOption(o => o.setName('rule_number').setDescription('Rule number to remove (from /rules list)').setMinValue(1))
+            .addStringOption(o => o.setName('query').setDescription('Keyword or text of rule to remove'))
+            .addBooleanOption(o => o.setName('clear_all').setDescription('Delete all custom rules'))
+        )
         .addSubcommand(s =>
           s.setName('update')
             .setDescription('Scan server and post/update clean luxury community rules in the rules channel')
@@ -118,6 +136,41 @@ class BotMemoryModule {
 
     if (interaction.commandName === 'rules') {
       const sub = interaction.options.getSubcommand();
+      if (sub === 'list') {
+        const directives = this.getDirectivesList(guild.id);
+        if (!directives || directives.length === 0) {
+          return interaction.editReply('📭 **No custom rules currently active in server memory.**\nUse `/rules add` or `!rules add` to create one.');
+        }
+
+        const formatted = directives.map((d, i) => `**${i + 1}.** ${d}`).join('\n\n');
+        const embed = new EmbedBuilder()
+          .setColor(0x5865F2)
+          .setTitle(`📋 Custom Server Rules & Directives • ${guild.name} (${directives.length})`)
+          .setDescription(formatted)
+          .setFooter({ text: 'To remove a rule, use /rules remove rule_number:<num> or !rules remove <num>' })
+          .setTimestamp();
+
+        return interaction.editReply({ embeds: [embed] });
+      }
+
+      if (sub === 'remove') {
+        const ruleNum = interaction.options.getInteger('rule_number');
+        const query = interaction.options.getString('query');
+        const clearAll = interaction.options.getBoolean('clear_all');
+
+        const target = clearAll ? 'all' : (ruleNum !== null ? ruleNum : query);
+        if (!target) {
+          return interaction.editReply('⚠️ Please provide a `rule_number` or search `query` to remove. Use `/rules list` to see rule numbers.');
+        }
+
+        const res = await this.removeDirective(guild, target);
+        if (res.success) {
+          return interaction.editReply(`✅ **Rule Removed!**\n• Removed: "${res.removed}"\n• Remaining Rules: \`${res.remainingCount}\`\nRules channel and state vault updated.`);
+        } else {
+          return interaction.editReply(`❌ **Failed to remove rule:** ${res.error}`);
+        }
+      }
+
       if (sub === 'view') {
         const secDb = this.db.security || this.configDb;
         const storedRules = secDb.get(`rules_${guild.id}`) ||
@@ -789,8 +842,8 @@ class BotMemoryModule {
         if (messages && messages.size > 0) {
           const sorted = Array.from(messages.values()).reverse();
           for (const msg of sorted) {
-            // Ignore bot's own instructional embeds
-            if (msg.author.id === this.client.user?.id && msg.embeds?.length > 0) continue;
+            // Ignore bot's own instructional embeds or status confirmations
+            if (msg.author.id === this.client.user?.id && (msg.embeds?.length > 0 || msg.content?.includes('Directive Learned & Saved'))) continue;
             if (!msg.content || !msg.content.trim()) continue;
 
             let cleanRule = msg.content.trim();
@@ -800,17 +853,15 @@ class BotMemoryModule {
             }
           }
         }
+        // When rules channel exists, its actual active messages are canonical
+        this.guildDirectives.set(guild.id, directives);
+        this.utilDb.set(`directives_${guild.id}`, directives, true);
+      } else {
+        const dbDirectives = this.utilDb.get(`directives_${guild.id}`) || [];
+        this.guildDirectives.set(guild.id, dbDirectives);
       }
 
-      // Merge with persistent DB so we never lose directives
-      const dbDirectives = this.utilDb.get(`directives_${guild.id}`) || [];
-      for (const d of dbDirectives) {
-        if (!directives.includes(d)) directives.push(d);
-      }
-
-      this.guildDirectives.set(guild.id, directives);
-      this.utilDb.set(`directives_${guild.id}`, directives, true);
-      console.log(`[BOT RULES] Synced ${directives.length} active custom directives for ${guild.name}`);
+      console.log(`[BOT RULES] Synced ${this.guildDirectives.get(guild.id)?.length || 0} active custom directives for ${guild.name}`);
     } catch (err) {
       console.warn(`[BOT RULES] Sync error for ${guild?.name}:`, err.message);
     }
@@ -911,6 +962,77 @@ class BotMemoryModule {
       return { success: true, channelId: rulesChan ? rulesChan.id : null, messageId: sentMsg ? sentMsg.id : null };
     } catch (err) {
       console.error('[BOT MEMORY ADD DIRECTIVE ERROR]', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Removes a directive by 1-based index, keyword/substring, or clears all
+   */
+  async removeDirective(guild, target) {
+    try {
+      let list = this.getDirectivesList(guild.id);
+      if (!list || list.length === 0) {
+        return { success: false, error: 'No custom rules found in server memory.' };
+      }
+
+      let removedItem = null;
+      let newList = [];
+
+      const targetNum = parseInt(target, 10);
+      if (!isNaN(targetNum) && targetNum >= 1 && targetNum <= list.length) {
+        removedItem = list[targetNum - 1];
+        newList = list.filter((_, idx) => idx !== (targetNum - 1));
+      } else if (typeof target === 'string') {
+        const query = target.toLowerCase().trim();
+        if (query === 'all' || query === 'clear') {
+          removedItem = `All (${list.length}) custom rules cleared`;
+          newList = [];
+        } else {
+          const foundIdx = list.findIndex(r => r.toLowerCase().includes(query));
+          if (foundIdx !== -1) {
+            removedItem = list[foundIdx];
+            newList = list.filter((_, idx) => idx !== foundIdx);
+          } else {
+            return { success: false, error: `Could not find any rule matching "${target}". Use /rules list to see rule numbers.` };
+          }
+        }
+      } else {
+        return { success: false, error: 'Invalid target. Provide a rule number (e.g. 1) or rule text.' };
+      }
+
+      this.guildDirectives.set(guild.id, newList);
+      this.utilDb.set(`directives_${guild.id}`, newList, true);
+
+      // Clean up matching message in #bot-rules channel if found
+      const rulesChan = await this.getRulesChannel(guild);
+      if (rulesChan) {
+        try {
+          const msgs = await rulesChan.messages.fetch({ limit: 50 }).catch(() => null);
+          if (msgs && msgs.size > 0) {
+            for (const msg of msgs.values()) {
+              if (typeof target === 'string' && (target.toLowerCase() === 'all' || target.toLowerCase() === 'clear')) {
+                if (msg.author.id === this.client.user?.id || msg.author.id === '1320083615475830797') {
+                  await msg.delete().catch(() => {});
+                }
+              } else if (removedItem && msg.content && (msg.content.includes(removedItem) || removedItem.includes(msg.content.trim()))) {
+                await msg.delete().catch(() => {});
+              }
+            }
+          }
+        } catch (mErr) {}
+      }
+
+      // Update backup in #bot-memory
+      await this.backupState(guild);
+
+      return {
+        success: true,
+        removed: removedItem,
+        remainingCount: newList.length
+      };
+    } catch (err) {
+      console.error('[BOT MEMORY REMOVE DIRECTIVE ERROR]', err);
       return { success: false, error: err.message };
     }
   }

@@ -5,7 +5,7 @@
 
 require('dotenv').config();
 const assert = require('assert');
-const { ChannelType } = require('discord.js');
+const { ChannelType, PermissionFlagsBits } = require('discord.js');
 const JSONDatabase = require('./database');
 
 // Import all modules
@@ -320,6 +320,105 @@ async function runTests() {
     assert.ok(alertSent, 'Alert report must be dispatched to alerts channel');
     assert.ok(alertSent.embeds[0].data.title.includes('HONEYPOT VIOLATION'));
     assert.ok(alertSent.components && alertSent.components.length > 0, 'Must include 1-click mod action buttons');
+  });
+
+  // 3c. SELF-PROMOTION RESTRICTION DIRECTIVE
+  await test('ModerationModule - Self-Promotion Channel Directive Guard & Member Role Restriction', async () => {
+    const mod = new ModerationModule(mockClient, db);
+
+    const selfPromoChan = {
+      id: '1540409739236745378',
+      name: '✨・self-promotions'
+    };
+    const generalChatChan = {
+      id: '1540409723130617976',
+      name: '💬・general-chat'
+    };
+
+    mockGuild.channels.cache.set(selfPromoChan.id, selfPromoChan);
+    mockGuild.channels.cache.set(generalChatChan.id, generalChatChan);
+
+    let replySent = null;
+    let messageDeleted = false;
+
+    // Test Case 1: Member-tier user posting promo in #general-chat
+    const promoMsg = {
+      guild: mockGuild,
+      channel: generalChatChan,
+      author: { id: 'member_user_1', bot: false },
+      member: {
+        roles: { highest: { position: 27, name: '👥 Members' } },
+        permissions: { has: () => false }
+      },
+      content: 'check out my youtube channel https://youtube.com/cool-video',
+      reply: async (payload) => {
+        replySent = payload;
+        return { delete: async () => {} };
+      },
+      delete: async () => { messageDeleted = true; }
+    };
+
+    const blocked = await mod.checkPromoRestriction(promoMsg);
+    assert.strictEqual(blocked, true, 'Promo in #general-chat from member-tier role must be blocked');
+    assert.ok(messageDeleted, 'Offending promo message must be deleted');
+    assert.ok(replySent && replySent.content.includes('no promo in this channel use the <#1540409739236745378> channel only'), 'Bot must reply redirecting to #self-promotions');
+
+    // Test Case 2: Member-tier user posting non-promo message in #general-chat
+    messageDeleted = false;
+    replySent = null;
+    const cleanMsg = {
+      guild: mockGuild,
+      channel: generalChatChan,
+      author: { id: 'member_user_1', bot: false },
+      member: {
+        roles: { highest: { position: 27, name: '👥 Members' } },
+        permissions: { has: () => false }
+      },
+      content: 'Hey guys what video editing software do you prefer?',
+      reply: async (payload) => { replySent = payload; },
+      delete: async () => { messageDeleted = true; }
+    };
+    const cleanBlocked = await mod.checkPromoRestriction(cleanMsg);
+    assert.strictEqual(cleanBlocked, false, 'Non-promo discussion in #general-chat must be allowed');
+    assert.strictEqual(messageDeleted, false, 'Clean message must not be deleted');
+
+    // Test Case 3: Member-tier user posting promo in #self-promotions
+    messageDeleted = false;
+    replySent = null;
+    const selfPromoMsg = {
+      guild: mockGuild,
+      channel: selfPromoChan,
+      author: { id: 'member_user_1', bot: false },
+      member: {
+        roles: { highest: { position: 27, name: '👥 Members' } },
+        permissions: { has: () => false }
+      },
+      content: 'Check out my portfolio and youtube channel https://youtube.com/cool-video',
+      reply: async (payload) => { replySent = payload; },
+      delete: async () => { messageDeleted = true; }
+    };
+    const promoAllowed = await mod.checkPromoRestriction(selfPromoMsg);
+    assert.strictEqual(promoAllowed, false, 'Promos inside #self-promotions must be permitted');
+    assert.strictEqual(messageDeleted, false, 'Self-promotions channel message must not be deleted');
+
+    // Test Case 4: Staff/Admin posting in #general-chat
+    messageDeleted = false;
+    replySent = null;
+    const staffMsg = {
+      guild: mockGuild,
+      channel: generalChatChan,
+      author: { id: 'staff_user_1', bot: false },
+      member: {
+        roles: { highest: { position: 29, name: '🛡️ Moderator' } },
+        permissions: { has: (perm) => perm === PermissionFlagsBits.ManageMessages }
+      },
+      content: 'Join our announcement stream: https://youtube.com/live',
+      reply: async (payload) => { replySent = payload; },
+      delete: async () => { messageDeleted = true; }
+    };
+    const staffBlocked = await mod.checkPromoRestriction(staffMsg);
+    assert.strictEqual(staffBlocked, false, 'Staff roles are exempt from promo blocking');
+    assert.strictEqual(messageDeleted, false, 'Staff message must not be deleted');
   });
 
   await test('ModerationModule - Join Raid & Bot Gate Deconfliction (Yielded to Wick Bot)', async () => {
@@ -2727,6 +2826,156 @@ async function runTests() {
     // Confirm @Member was automatically designated as auto-role
     const guildBCfg = db.config.get(mockGuildB.id);
     assert.ok(guildBCfg && guildBCfg.autoRoleId, 'Member role must be linked as autoRoleId in guild config');
+  });
+
+  await test('40. Direct Message Dispatch Command via Bot Mention / Reply / ID', async () => {
+    const BOT_OWNER_ID = '1320083615475830797';
+    let dmDispatches = [];
+    const targetRecipient = {
+      id: 'recipient_99999',
+      username: 'TargetCreative',
+      tag: 'TargetCreative#0001',
+      bot: false,
+      send: async (payload) => {
+        dmDispatches.push(payload);
+        return payload;
+      }
+    };
+
+    const mockDmClient = {
+      user: { id: 'bot_omni_id', username: 'EditX' },
+      users: {
+        fetch: async (id) => id === 'recipient_99999' ? targetRecipient : null
+      }
+    };
+
+    const dmReminder = new DMReminderModule(mockDmClient, db);
+
+    const testChannel = {
+      id: 'chan_chat_1',
+      name: 'general-chat',
+      messages: {
+        fetch: async (id) => {
+          if (id === 'msg_to_reply_to') {
+            return {
+              id: 'msg_to_reply_to',
+              author: targetRecipient,
+              content: 'Hey everyone, check my portfolio'
+            };
+          }
+          return null;
+        }
+      }
+    };
+
+    const staffMember = {
+      id: BOT_OWNER_ID,
+      user: { id: BOT_OWNER_ID, username: 'ServerOwner' },
+      permissions: { has: (perm) => true },
+      roles: { cache: new Map([['admin_role', { position: 30 }]]) }
+    };
+
+    // Scenario A: Ping bot and mention user -> @EditX dm @user Please check your ticket
+    let replyA = null;
+    const msgA = {
+      guild: { id: 'guild_1', name: 'EditX Network', iconURL: () => 'https://cdn.discordapp.com/icon.png' },
+      channel: testChannel,
+      author: { id: BOT_OWNER_ID, username: 'ServerOwner' },
+      member: staffMember,
+      content: '<@bot_omni_id> dm <@recipient_99999> Please check your ticket regarding your project',
+      mentions: {
+        users: new Map([
+          ['bot_omni_id', mockDmClient.user],
+          ['recipient_99999', targetRecipient]
+        ])
+      },
+      reply: async (payload) => { replyA = payload; return payload; }
+    };
+
+    const handledA = await dmReminder.handleDmDispatchCommand(msgA);
+    assert.strictEqual(handledA, true, 'Must handle mention DM dispatch');
+    assert.strictEqual(dmDispatches.length, 1, 'Target user must receive DM');
+    assert.ok(dmDispatches[0].embeds[0].data.description.includes('Please check your ticket regarding your project'), 'DM content must match');
+    assert.ok(replyA && replyA.content.includes('Direct message delivered to <@recipient_99999>'), 'Staff must receive in-chat confirmation');
+
+    // Scenario B: Reply to a user\'s message saying "@EditX dm this person Please verify your submission"
+    dmDispatches = [];
+    let replyB = null;
+    const msgB = {
+      guild: { id: 'guild_1', name: 'EditX Network', iconURL: () => 'https://cdn.discordapp.com/icon.png' },
+      channel: testChannel,
+      author: { id: BOT_OWNER_ID, username: 'ServerOwner' },
+      member: staffMember,
+      content: '<@bot_omni_id> dm this person Please verify your submission',
+      mentions: {
+        users: new Map([
+          ['bot_omni_id', mockDmClient.user]
+        ])
+      },
+      reference: { messageId: 'msg_to_reply_to' },
+      reply: async (payload) => { replyB = payload; return payload; }
+    };
+
+    const handledB = await dmReminder.handleDmDispatchCommand(msgB);
+    assert.strictEqual(handledB, true, 'Must handle reply reference DM dispatch');
+    assert.strictEqual(dmDispatches.length, 1, 'Referenced user must receive DM');
+    assert.ok(dmDispatches[0].embeds[0].data.description.includes('Please verify your submission'), 'DM must contain message');
+    assert.ok(replyB && replyB.content.includes('Direct message delivered to <@recipient_99999>'), 'Staff must receive in-chat confirmation');
+
+    // Scenario C: Non-staff member attempts to use it -> Permission Denied
+    let replyC = null;
+    const nonStaffMember = {
+      id: 'unauth_user_1',
+      user: { id: 'unauth_user_1', username: 'RegularGuy' },
+      permissions: { has: () => false },
+      roles: { cache: new Map([['member_role', { position: 5 }]]) }
+    };
+    const msgC = {
+      guild: { id: 'guild_1', name: 'EditX Network' },
+      channel: testChannel,
+      author: { id: 'unauth_user_1', username: 'RegularGuy' },
+      member: nonStaffMember,
+      content: '<@bot_omni_id> dm <@recipient_99999> unauthorized msg',
+      mentions: {
+        users: new Map([
+          ['bot_omni_id', mockDmClient.user],
+          ['recipient_99999', targetRecipient]
+        ])
+      },
+      reply: async (payload) => { replyC = payload; return payload; }
+    };
+
+    const handledC = await dmReminder.handleDmDispatchCommand(msgC);
+    assert.strictEqual(handledC, true, 'Must intercept unauthorized DM command');
+    assert.ok(replyC && replyC.content.includes('Only server staff and administrators'), 'Must reject non-staff users');
+
+    // Scenario D: Target user with closed DMs -> Graceful error reporting
+    const closedDmUser = {
+      id: 'closed_dm_user',
+      username: 'ClosedDMs',
+      tag: 'ClosedDMs#0001',
+      bot: false,
+      send: async () => { throw new Error('Cannot send messages to this user'); }
+    };
+    let replyD = null;
+    const msgD = {
+      guild: { id: 'guild_1', name: 'EditX Network' },
+      channel: testChannel,
+      author: { id: BOT_OWNER_ID, username: 'ServerOwner' },
+      member: staffMember,
+      content: '<@bot_omni_id> dm <@closed_dm_user> hello closed dm',
+      mentions: {
+        users: new Map([
+          ['bot_omni_id', mockDmClient.user],
+          ['closed_dm_user', closedDmUser]
+        ])
+      },
+      reply: async (payload) => { replyD = payload; return payload; }
+    };
+
+    const handledD = await dmReminder.handleDmDispatchCommand(msgD);
+    assert.strictEqual(handledD, true, 'Must handle closed DM gracefully');
+    assert.ok(replyD && replyD.content.includes('Could not deliver DM'), 'Must report closed/blocked DMs');
   });
 
   console.log('\n====================================================');

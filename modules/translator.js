@@ -87,22 +87,20 @@ class TranslatorModule {
     // Greek
     if (/[\u0370-\u03FF]/.test(clean)) return true;
 
-    // For space-separated Latin alphabets, require at least 2 words and >= 8 chars to avoid false alarms on typos
-    if (clean.length < 8 || clean.split(/\s+/).length < 2) return false;
-
     // Common non-English Latin diacritics & markers (Spanish, French, German, Portuguese, Vietnamese, etc.)
     if (/[¿¡ñÑçÇäÄöÖüÜßéÉèÈêÊàÀôÔùÙáÁíÍóÓúÚãÃõÕâÂîÎûÛ]/i.test(clean)) return true;
 
-    // Common non-English phrases in Latin script (Spanish, French, German, Hindi Hinglish, Tagalog, etc.)
+    // Common non-English phrases/words in Latin script (Spanish, French, German, Hindi Hinglish, Tagalog, etc.)
     const commonForeignTriggers = [
-      /\b(hola|amigo|gracias|por favor|buenas|como estas|que tal|ayuda|necesito|donde|quien)\b/i,
-      /\b(bonjour|merci|salut|s'il vous plait|comment|pourquoi|avec|tres|bien)\b/i,
+      /\b(hola|amigo|amiga|gracias|por favor|buenas|como estas|que tal|ayuda|necesito|donde|quien|todos)\b/i,
+      /\b(bonjour|merci|salut|s'il vous plait|comment|pourquoi|avec|tres|bien|oui|non)\b/i,
       /\b(hallo|guten tag|danke|bitte|wie gehts|warum|nicht|ich bin)\b/i,
       /\b(ciao|grazie|prego|buongiorno|per favore|come stai)\b/i,
-      /\b(ola|obrigado|por favor|bom dia|como vai|tudo bem)\b/i,
-      /\b(kya|kaise|hai|bhai|mujhe|chahiye|karo|mera|meri|karna|nahi|acha)\b/i,
+      /\b(ola|obrigado|obrigada|por favor|bom dia|como vai|tudo bem)\b/i,
+      /\b(kya|kaise|hai|bhai|mujhe|chahiye|karo|mera|meri|karna|nahi|acha|theek|kuch|batao|shukriya|namaste|sun)\b/i,
       /\b(kamusta|salamat|bakit|ano|opo|magkano)\b/i,
-      /\b(xin chao|cam on|lam on|the nao)\b/i
+      /\b(xin chao|cam on|lam on|the nao)\b/i,
+      /\b(arigato|konnichiwa|sayonara|tasukete)\b/i
     ];
 
     if (commonForeignTriggers.some(rgx => rgx.test(clean))) {
@@ -323,16 +321,7 @@ ${cleanText}
     const isAutoDisabled = this.db.get(`translate_disabled_${guildId}`, false);
     if (isAutoDisabled) return false;
 
-    // ── MUTE AWARENESS ──────────────────────────────────────────────────────────
-    // Respect server-wide silence (e.g. "@EditX don't send any kind of msg in this server")
-    const isServerMuted = Boolean(this.db.get(`aichat_muted_server_${guildId}`));
-    if (isServerMuted) return false;
-
-    // Respect per-channel silence (e.g. "@EditX don't reply in this channel")
-    const mutedChannels = this.db.get(`aichat_muted_${guildId}`) || [];
-    if (mutedChannels.includes(message.channel.id)) return false;
-    // ─────────────────────────────────────────────────────────────────────────────
-
+    // Check if channel is specifically ignored for translation
     const ignoredChannels = this.db.get(`translate_ignore_channels_${guildId}`, []);
     if (ignoredChannels.includes(message.channel.id)) return false;
 

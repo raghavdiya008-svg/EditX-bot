@@ -12,20 +12,31 @@
     "enabled": true,
     "channelId": "1540409717967421500",
     "cardEnabled": true,
-    "dmEnabled": false,
+    "dmEnabled": true,
     "theme": "dark"
   },
   "bump_cfg_1538957031455596544": {
     "channelId": "1540707425110204586",
-    "roleId": "1538964380090245221",
-    "updatedAt": 1789319722074
+    "roleId": "1550881183254974589",
+    "updatedAt": 1789830211023
   },
   "directives_1538957031455596544": [
-    {
-      "id": "dir_1790519369287",
-      "text": "[#general-chat Directive] Strict prohibition on promotional messages, service advertisements, or portfolio links in general chat.",
-      "createdBy": "1320083615475830797",
-      "createdAt": 1790519369287
-    }
-  ]
+    "📌 **Directive [from r13598og]:** Do not send messages or reply in #🛡️・moderator-only.",
+    "dont kick anyone other than somone found msg in <#1546818053059379251>  just report me",
+    "dont allow anyone to post any kind of nitro and server invite link",
+    "if anyone types the word nitro just delete that msg it dont do anything other than that",
+    "dont reply to anything in <#1538967412672565319>",
+    "do not respond for @here and @everyone",
+    "📌 **Directive [from r13598og]:** do not respond for @here and @everyone",
+    "📌 **[DIRECTIVE // #general-chat]**: Strict prohibition on self-promotion, advertising, freelance service solicitation, and promo copy in #general-chat. Direct members to #for-hire and designated channels.",
+    "📌 **Directive [from EditX#0799]:** Other than #self-promotions, if anyone whose highest role is a member role posts promo of anything, reply 'no promo in this channel use the #self-promotions channel only' and delete that message."
+  ],
+  "forhire_chan_1538957031455596544": "1540409737177468958",
+  "aichat_muted_1538957031455596544": [
+    "1538967412672565319",
+    "1540409723130617976"
+  ],
+  "aichat_muted_server_1538957031455596544": null,
+  "server_context_1538957031455596544": "# SERVER KNOWLEDGE BASE & AUDIT: EDITX | THE CREATIVE NETWORK\n• Server ID: 1538957031455596544\n• Member Count: 156\n• Owner ID: 1320083615475830797\n• Scanned At: 2026-09-16T18:08:33.413Z\n• Initiated By: r13598og\n\n## 1. SERVER ARCHITECTURE & CHANNELS\n### Category: ╭━━〔 ✦ INFORMATION 〕━━╮\n  - #📜・rules-guidelines\n  - #📢・announcements\n  - #👋・welcome-hub\n  - #✨・get-roles\n\n### Category: ╭━━〔 💬 COMMUNITY HUB 〕━━╮\n  - #💬・general-chat\n  - #🎞️・edit-feedback\n  - #🎞️・editing-help\n  - #🤖・bot-commands\n  - #🎞️・editing-review\n\n### Category: ╭━━〔 ✦ MARKETPLACE 〕━━╮\n  - #✨・for-hire\n  - #✨・self-promotions\n  - #✨・hiring\n  - #✨・remarks\n\n### Category: ╭━━〔 ✦ SUPPORT 〕━━╮\n  - #🎟️・support-ticket\n\n### Category: ╭━━〔 🛡️ STAFF QUARTERS 〕━━╮\n  - #🛡️・moderator-only\n  - #🚀・pls-bump\n  - #🔗・invites-tracker\n  - #📋・wick-logs\n  - #🛡️・modlogs\n  - #🤖・bot-memory (EditX Bot Persistent State Vault • Automatic Cloud Backup • Do Not Delete)\n  - #📜・bot-rules (EditX Bot Live Custom Directives • Post rules here for the bot to follow)\n  - #✨・alerts\n\n### Category: ╭━━〔 ✦ SERVER STATS 〕━━╮\n  (No text channels)\n\n### Category: ╭━━〔 🔊 VOICE LOUNGE 〕━━╮\n  (No text channels)\n\n### Uncategorized Channels:\n  - #✅・verify-here\n  - #✨・do-not-type-here\n  - #🎞️・edithub-bot-testing\n\n## 2. VOICE & MEDIA CHANNELS\n- 🔊 🔊・Editor Lounge\n- 🔊 #Lofi-Editing-Lounge\n- 🔊 channel 2\n- 🔊 channel 3\n- 🔊 👥・Members: 146\n- 🔊 🚀・Boost Level: 0 (0)\n\n## 3. KEY ROLES & HIERARCHY\nWick, Beemo, Quarantine, 👑 Admin, 🛡️ Moderator, 👥 Members, 🎬 Video Editor, 📸 Photo Editor, 🎨 Graphic Designer, 💫 Animator, ✨ Motion Designer, 💼 Client, ⚡ After Effects, 🎞️ Premiere Pro, 🎛️ Davinci Resolve, 📱 CapCut, ✂️ Sony Vegas, ✨ Alight Motion, 🖌️ Photoshop, 📷 Lightroom\n\n## 4. SERVER GUIDELINES & EXTRACTED RULES\n1. [#📜・rules-guidelines] 📜・COMMUNITY GUIDELINES // EDITX | The Creative Network\nWelcome to **EDITX | The Creative Network**! To maintain a productive, creative, and safe environment for all members, please review our official rules.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n### 1. 🛡️ Mutual Respect & Creative Professionalism\nTreat every member with courtesy. Hate speech, harassment, slurs, doxxing threats, or unsolicited sexual content will result in an immediate ban.\n\n### 2. 🚫 Zero Scam, Phishing, or Unauthorized Invites\n\n2. [#👋・welcome-hub] <@1543327038088417330>\n3. [#👋・welcome-hub] <@1549355784998092863>\n4. [#👋・welcome-hub] <@1499166139543060561>\n5. [#👋・welcome-hub] <@1544661816796258409>\n6. [#👋・welcome-hub] <@1547643738346623119>\n7. [#👋・welcome-hub] <@1544661816796258409>\n8. [#👋・welcome-hub] <@1544661816796258409>\n9. [#👋・welcome-hub] <@1544661816796258409>\n10. [#👋・welcome-hub] <@1535583440534110299>\n\n## 5. ACTIVE BOT CHANNELS\n• Memory Vault: #🤖・bot-memory (1549031332229943316)\n• Directives Desk: #📜・bot-rules (1549031332955299930)",
+  "dm_report_channel_1538957031455596544": "1550872261748334623"
 }
