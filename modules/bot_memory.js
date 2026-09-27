@@ -588,6 +588,14 @@ class BotMemoryModule {
           }
           return data;
         })(),
+        dm: (() => {
+          if (!this.db.dm) return null;
+          const data = {};
+          for (const [k, v] of this.db.dm.entries()) {
+            if (k.startsWith(`${guild.id}_`) || k.includes(guild.id)) data[k] = v;
+          }
+          return data;
+        })(),
         directives: this.utilDb.get(`directives_${guild.id}`) || this.guildDirectives.get(guild.id) || []
       };
 
@@ -807,6 +815,12 @@ class BotMemoryModule {
       if (snapshot.giveaways && this.db.giveaways) {
         for (const [k, v] of Object.entries(snapshot.giveaways)) {
           this.db.giveaways.set(k, v);
+          restoredCount++;
+        }
+      }
+      if (snapshot.dm && this.db.dm) {
+        for (const [k, v] of Object.entries(snapshot.dm)) {
+          this.db.dm.set(k, v);
           restoredCount++;
         }
       }
