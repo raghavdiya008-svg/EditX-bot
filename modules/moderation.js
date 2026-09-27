@@ -1102,8 +1102,8 @@ class ModerationModule {
           }
         }
 
-        // Softban purge fallback for non-report / legacy configurations & unit tests
-        if (config.reportOnly !== true && config.honeypotAction !== 'STRIP_ROLES') {
+        // Only perform softban if explicitly requested via honeypotAction: 'SOFTBAN' (NEVER by default)
+        if (config.honeypotAction === 'SOFTBAN') {
           try {
             await message.guild.members.ban(message.author.id, {
               deleteMessageSeconds: 3600,
@@ -1245,7 +1245,8 @@ class ModerationModule {
           } catch (rErr) {}
         }
 
-        if (config.reportOnly !== true && config.honeypotAction !== 'STRIP_ROLES') {
+        // Only perform softban if explicitly requested via honeypotAction: 'SOFTBAN' (NEVER by default)
+        if (config.honeypotAction === 'SOFTBAN') {
           try {
             await message.guild.members.ban(user.id, {
               deleteMessageSeconds: 3600,

@@ -244,7 +244,7 @@ async function runTests() {
   // 3. HONEYPOT & BEEMO SECURITY TESTING
   await test('ModerationModule - Honeypot Trap Detection (Softban & 1h Message Purge)', async () => {
     const mod = new ModerationModule(mockClient, db);
-    db.security.set(mockGuild.id, { honeypotChannelId: 'trap_chan_999' });
+    db.security.set(mockGuild.id, { honeypotChannelId: 'trap_chan_999', honeypotAction: 'SOFTBAN' });
 
     globalBannedIds = [];
     globalUnbannedIds = [];
