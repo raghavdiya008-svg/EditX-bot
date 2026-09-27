@@ -1546,6 +1546,37 @@ class UtilityModule {
   }
 
   async handleJoin(member) {
+    if (!member || !member.guild || !member.id) return;
+
+    // --- TRIPLE-LAYER DEDUPLICATION LOCK (Prevents Double Messages) ---
+    if (!this.welcomedMemberLocks) {
+      this.welcomedMemberLocks = new Map();
+    }
+    const joinLockKey = `${member.guild.id}_${member.id}`;
+    const now = Date.now();
+
+    // Layer 1: In-memory sliding window
+    if (this.welcomedMemberLocks.has(joinLockKey)) {
+      const lastJoinTime = this.welcomedMemberLocks.get(joinLockKey);
+      if (now - lastJoinTime < 60000) {
+        console.log(`[WELCOMER DEDUP] Blocked rapid duplicate join event for ${member.user?.tag || member.id} (sent ${now - lastJoinTime}ms ago)`);
+        return;
+      }
+    }
+    this.welcomedMemberLocks.set(joinLockKey, now);
+    setTimeout(() => this.welcomedMemberLocks.delete(joinLockKey), 600000);
+
+    // Layer 2: Persistent database lock (reboot & cross-worker protection)
+    const persistentKey = `welcomed_${member.guild.id}_${member.id}`;
+    const lastPersistent = this.utilDb?.get ? this.utilDb.get(persistentKey) : null;
+    if (lastPersistent && (now - lastPersistent < 60000)) {
+      console.log(`[WELCOMER DEDUP] Blocked persistent duplicate join event for ${member.id}`);
+      return;
+    }
+    if (this.utilDb?.set) {
+      this.utilDb.set(persistentKey, now);
+    }
+
     let inviterId = null;
     let usedCode = null;
     let isVanity = false;
@@ -1745,6 +1776,25 @@ class UtilityModule {
     }
 
     if (channel && welcomerConfig.enabled !== false) {
+      // Layer 3: Channel History Inspection (Guarantees zero duplicate sends across shards/workers)
+      try {
+        if (channel.messages && typeof channel.messages.fetch === 'function') {
+          const recentMessages = await channel.messages.fetch({ limit: 8 }).catch(() => null);
+          if (recentMessages && recentMessages.size > 0) {
+            const alreadyPosted = recentMessages.some(m => {
+              const isSelf = m.author?.id === this.client?.user?.id;
+              const hasUserMention = m.content && (m.content.includes(`<@${member.id}>`) || m.content.includes(member.id));
+              const isRecent = (Date.now() - (m.createdTimestamp || 0)) < 45000;
+              return isSelf && hasUserMention && isRecent;
+            });
+            if (alreadyPosted) {
+              console.log(`[WELCOMER DEDUP] Message for <@${member.id}> already exists in #${channel.name}, skipping duplicate send!`);
+              return;
+            }
+          }
+        }
+      } catch (e) {}
+
       const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join', inviterInfo);
 
       // Simple, clean copy-paste welcome message by default (Matches user requirement)
