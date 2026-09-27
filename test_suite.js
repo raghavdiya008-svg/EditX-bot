@@ -2978,6 +2978,50 @@ async function runTests() {
     assert.ok(replyD && replyD.content.includes('Could not deliver DM'), 'Must report closed/blocked DMs');
   });
 
+  await test('41. AI Chat Silence Guard - Absolute suppression of @everyone and @here', async () => {
+    const aiChatMod = new AIChatModule(mockClient, db);
+    let botReplied = false;
+    const testChannel = {
+      id: 'chan_chat_1',
+      name: 'general-chat',
+      send: async () => { botReplied = true; }
+    };
+
+    // Message 1: mentions @here
+    const msgHere = {
+      guild: mockGuild,
+      channel: testChannel,
+      author: { id: 'some_user_1', bot: false },
+      content: 'hey guys check this out @here',
+      mentions: {
+        everyone: true,
+        users: new Map([[mockClient.user.id, mockClient.user]])
+      },
+      reply: async () => { botReplied = true; }
+    };
+
+    const handledHere = await aiChatMod.checkMessage(msgHere);
+    assert.strictEqual(handledHere, false, 'Must ignore @here pings completely');
+    assert.strictEqual(botReplied, false, 'Must not send any reply to @here');
+
+    // Message 2: mentions @everyone
+    const msgEveryone = {
+      guild: mockGuild,
+      channel: testChannel,
+      author: { id: 'some_user_1', bot: false },
+      content: '@everyone please read announcements',
+      mentions: {
+        everyone: true,
+        users: new Map()
+      },
+      reply: async () => { botReplied = true; }
+    };
+
+    const handledEveryone = await aiChatMod.checkMessage(msgEveryone);
+    assert.strictEqual(handledEveryone, false, 'Must ignore @everyone completely');
+    assert.strictEqual(botReplied, false, 'Must not send any reply to @everyone');
+  });
+
   console.log('\n====================================================');
   console.log(`🏁 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('====================================================\n');

@@ -195,11 +195,16 @@ class AIChatModule {
     if (message.author.bot || !message.guild) return false;
     try {
 
+    // 0. ABSOLUTE SILENCE GUARD: Never respond to @everyone or @here pings under any circumstances
+    if (message.mentions?.everyone || /@(everyone|here)\b/i.test(message.content)) {
+      return false;
+    }
+
     const guildId = message.guild.id;
     const cfg = this.db.get(`aichat_cfg_${guildId}`) || {};
     const isDedicatedChannel = cfg.chatChannelId && message.channel.id === cfg.chatChannelId;
 
-    const isMentioned = message.mentions.has(this.client.user);
+    const isMentioned = Boolean(this.client.user && message.mentions?.users?.has(this.client.user.id));
     const isReplyingToBot = Boolean(message.reference && (await this.isReplyToBot(message)));
     const startsWithBotName = /^(\b(hey\s+|yo\s+)?editx\b|\bbot\b[,:]?\s+)/i.test(message.content);
 
@@ -574,6 +579,11 @@ class AIChatModule {
       } catch (e) {
         console.warn("[AI ACTION] Failed to parse AI action block", actionMatch[1]);
       }
+    }
+
+    // Suppress verbal LLM refusals when silence/not responding was instructed
+    if (/^(i('?m| am| will)?\s*(not\s+responding|not\s+allowed\s+to\s+respond|staying\s+silent)|i\s+cannot\s+respond|not\s+responding)/i.test(finalReply.trim())) {
+      return false;
     }
 
     if (finalReply.length > 2000) {
