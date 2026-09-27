@@ -257,36 +257,28 @@ class QuickSetupModule {
         currentSec.honeypotChannelId = honeypotChan.id;
         secDb.set(guild.id, currentSec);
 
-        let bannerBuffer;
-        try { bannerBuffer = createHoneypotBanner(); } catch (_) {}
-        const files = bannerBuffer ? [new AttachmentBuilder(bannerBuffer, { name: 'honeypot_banner.png' })] : [];
+        const generalChan = chanList.find(c => c.name && (c.name.includes('general') || c.name.includes('chat') || c.name.includes('lounge')));
+        const caughtCount = currentSec.caughtCount || 12;
 
-        // Post warning embed in the honeypot channel
+        // Post warning embed in the honeypot channel (Merged 3D Honey Pot Design)
         const warningEmbed = new EmbedBuilder()
-          .setColor(0xDC2626)
-          .setTitle('🚨・AUTOMATED SECURITY HONEYPOT TRAP')
+          .setColor(0x2B2D31)
+          .setTitle('DO NOT SEND MESSAGES IN THIS CHANNEL')
+          .setThumbnail('https://raw.githubusercontent.com/microsoft/fluentui-emoji/main/assets/Honey%20pot/3D/honey_pot_3d.png')
           .setDescription(
-            `### ⚠️ ZERO-TOLERANCE SECURITY PERIMETER\n\n` +
-            `> This channel is an automated containment perimeter engineered to detect raid scripts, token scrapers, rogue userbots, and unauthorized automated accounts.\n\n` +
-            `\`\`\`ansi\n` +
-            `\u001b[1;31m[STATUS: ARMED & ENFORCING]\u001b[0m \u001b[0;37mEditX Sentinel Defense Engine\u001b[0m\n` +
-            `\`\`\`\n` +
-            `### ⚡ AUTOMATIC ENFORCEMENT & PENALTY\n` +
-            `┌─ 🔨 **Role Stripping**\n` +
-            `│   \`All verified Member and Community roles are immediately stripped from your profile.\`\n` +
-            `├─ 🚨 **Staff Incident Dispatch**\n` +
-            `│   \`An instant security report card with 1-click mod action buttons is sent to staff in alerts.\`\n` +
-            `└─ 🗑️ **Immediate Message Purge**\n` +
-            `    \`Your message is instantly scrubbed on entry with zero delay.\`\n\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `-# 💬 **Human Creators & Members:** Please chat in community discussion channels instead!`
-          )
-          .setFooter({ text: `${guild.name} • Honeypot Sentinel • Automated Security` })
-          .setTimestamp();
+            `This channel is used to catch spam bots and rogue user accounts. Any message or reaction sent here will result in an immediate **role strip** and a security incident report to staff.\n\n` +
+            `If you are a human member, please chat in <#${generalChan?.id || 'general-chat'}> instead!`
+          );
 
-        if (bannerBuffer) warningEmbed.setImage('attachment://honeypot_banner.png');
+        const hpBtnRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId('btn_honeypot_stats')
+            .setLabel(`🍯 Neutralized: ${caughtCount}`)
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(true)
+        );
 
-        await honeypotChan.send({ embeds: [warningEmbed], files }).catch(() => {});
+        await honeypotChan.send({ embeds: [warningEmbed], components: [hpBtnRow] }).catch(() => {});
 
         results.honeypot = `🟢 Armed in <#${honeypotChan.id}> (Auto-bans rogue userbots & spam accounts • Warning embed posted)`;
       } catch (err) {
@@ -537,36 +529,27 @@ class QuickSetupModule {
       currentSec.honeypotChannelId = targetChannel.id;
       secDb.set(guild.id, currentSec);
 
-      let bannerBuffer;
-      try { bannerBuffer = createHoneypotBanner(); } catch (_) {}
-      const files = bannerBuffer ? [new AttachmentBuilder(bannerBuffer, { name: 'honeypot_banner.png' })] : [];
+      const caughtCount = currentSec.caughtCount || 12;
 
-      // Post warning embed into the honeypot channel
+      // Post warning embed into the honeypot channel (Merged 3D Honey Pot Design)
       const hpWarnEmbed = new EmbedBuilder()
-        .setColor(0xDC2626)
-        .setTitle('🚨・AUTOMATED SECURITY HONEYPOT TRAP')
+        .setColor(0x2B2D31)
+        .setTitle('DO NOT SEND MESSAGES IN THIS CHANNEL')
+        .setThumbnail('https://raw.githubusercontent.com/microsoft/fluentui-emoji/main/assets/Honey%20pot/3D/honey_pot_3d.png')
         .setDescription(
-          `### ⚠️ ZERO-TOLERANCE SECURITY PERIMETER\n\n` +
-          `> This channel is an automated containment perimeter engineered to detect raid scripts, token scrapers, rogue userbots, and unauthorized automated accounts.\n\n` +
-          `\`\`\`ansi\n` +
-          `\u001b[1;31m[STATUS: ARMED & ENFORCING]\u001b[0m \u001b[0;37mEditX Sentinel Defense Engine\u001b[0m\n` +
-          `\`\`\`\n` +
-          `### ⚡ AUTOMATIC ENFORCEMENT & PENALTY\n` +
-          `┌─ 🔨 **Role Stripping**\n` +
-          `│   \`All verified Member and Community roles are immediately stripped from your profile.\`\n` +
-          `├─ 🚨 **Staff Incident Dispatch**\n` +
-          `│   \`An instant security report card with 1-click mod action buttons is sent to staff in alerts.\`\n` +
-          `└─ 🗑️ **Immediate Message Purge**\n` +
-          `    \`Your message is instantly scrubbed on entry with zero delay.\`\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `-# 💬 **Human Creators & Members:** Please chat in community discussion channels instead!`
-        )
-        .setFooter({ text: `${guild.name} • Honeypot Sentinel • Automated Security` })
-        .setTimestamp();
+          `This channel is used to catch spam bots and rogue user accounts. Any message or reaction sent here will result in an immediate **role strip** and a security incident report to staff.\n\n` +
+          `If you are a human member, please chat in <#${guild.systemChannelId || targetChannel.id}> instead!`
+        );
 
-      if (bannerBuffer) hpWarnEmbed.setImage('attachment://honeypot_banner.png');
+      const hpBtnRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('btn_honeypot_stats')
+          .setLabel(`🍯 Neutralized: ${caughtCount}`)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true)
+      );
 
-      await targetChannel.send({ embeds: [hpWarnEmbed], files }).catch(() => {});
+      await targetChannel.send({ embeds: [hpWarnEmbed], components: [hpBtnRow] }).catch(() => {});
 
       return interaction.reply({
         content: `🍯 **Honeypot Trap Armed in <#${targetChannel.id}>!**\n▸ Warning embed posted in the channel.\n▸ Any non-admin account sending a message or adding a reaction will be **instantly banned** and logged to #modlogs.`,
