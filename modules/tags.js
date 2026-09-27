@@ -72,14 +72,14 @@ class TagsModule {
 
   buildStickyPayload(stickyData, channel, guild) {
     const themeColors = {
-      stealth: 0x2B2D31,
-      indigo: 0x6366F1,
-      cyan: 0x00F3FF,
+      stealth: 0x0F172A,
+      indigo: 0x0284C7,
+      cyan: 0x06B6D4,
       gold: 0xF59E0B,
       emerald: 0x10B981,
-      rose: 0xF43F5E
+      rose: 0xDC2626
     };
-    const color = themeColors[stickyData.theme] || 0x2B2D31;
+    const color = themeColors[stickyData.theme] || 0x06B6D4;
     const channelName = channel?.name || 'channel';
     const rawTitle = stickyData.title || `#${channelName.toUpperCase()} NOTICE`;
     const cleanTitle = rawTitle.replace(/^📌[・\s]*/, '');
@@ -88,14 +88,16 @@ class TagsModule {
       .setColor(color)
       .setTitle(`📌・${cleanTitle}`)
       .setDescription(
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `${stickyData.content}\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+        `### ⚠️ CHANNEL DIRECTIVE & MODERATION NOTICE\n\n` +
+        `> **${stickyData.content}**\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `-# 📌 Automatically maintained at the bottom of #${channelName} • Please respect community directives.`
       )
       .setFooter({
-        text: `📌 Sticky Notice • Automatically kept at bottom of #${channelName}`,
+        text: `${guild?.name || 'EDITX'} • Persistent Channel Directive`,
         iconURL: (guild?.iconURL && typeof guild.iconURL === 'function') ? guild.iconURL({ dynamic: true }) : undefined
-      });
+      })
+      .setTimestamp();
 
     if (guild?.iconURL && typeof guild.iconURL === 'function') {
       const gIcon = guild.iconURL({ dynamic: true, size: 128 });
@@ -397,8 +399,21 @@ class TagsModule {
 
         this.db.set(stickyKey, stickyData);
 
+        // Synchronize channel directive into Bot Memory & trigger vault backup
+        if (this.client.botMemory && typeof this.client.botMemory.addDirective === 'function') {
+          this.client.botMemory.addDirective(
+            guild,
+            `[#${targetChannel.name} Channel Directive] ${content}`,
+            user.id
+          ).then(() => {
+            if (typeof this.client.botMemory.backupState === 'function') {
+              this.client.botMemory.backupState(guild).catch(() => {});
+            }
+          }).catch(() => {});
+        }
+
         return interaction.reply({
-          content: `✅ Luxury sticky message set in <#${targetChannel.id}> (theme: **${theme}**, cooldown: **${cooldown}s**). It will automatically stay at the bottom of the channel.`,
+          content: `✅ Luxury sticky message set in <#${targetChannel.id}> (theme: **${theme}**, cooldown: **${cooldown}s**). Saved to bot memory & directives.`,
           ephemeral: true
         });
       }

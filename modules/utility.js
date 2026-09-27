@@ -1137,6 +1137,7 @@ class UtilityModule {
   }
 
   async checkReminders() {
+    if (!this.utilDb || typeof this.utilDb.entries !== 'function') return;
     const now = Date.now();
     for (const [key, rem] of this.utilDb.entries()) {
       if (key.startsWith('remind_') && rem.triggerAt && rem.triggerAt <= now) {
@@ -1432,8 +1433,11 @@ class UtilityModule {
           .replace(/\{code\}/gi, inviterInfo?.code || 'direct');
       } else {
         const inviterLine = inviterInfo?.user ? `\n> 📨 **Invited By:** ${inviterMention} (\`${invitesCount}\` invites)` : '';
-        desc = `Welcome to **${serverName}** — the premier community for video editors, VFX artists, and creative minds.${navSection}\n\n` +
-          `> 👤 **Member Position:** \`#${memberNum}\`　•　📅 **Account Created:** ${accountAgeText}${inviterLine}`;
+        desc = `### 🌐 WELCOME TO THE CREATIVE NETWORK\n\n` +
+          `Welcome <@${member.id}> to **${serverName}** — the premier community for video editors, VFX artists, and creative minds.${navSection}\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `> 👤 **Member Position:** \`#${memberNum}\`　•　📅 **Account Created:** ${accountAgeText}${inviterLine}\n` +
+          `-# 💡 Grab your roles, share your portfolio, and introduce yourself in the community lounge!`;
       }
     } else {
       if (config.leaveMessage && config.leaveMessage.trim()) {
@@ -1451,7 +1455,7 @@ class UtilityModule {
     }
 
     const embed = new EmbedBuilder()
-      .setColor(isJoin ? 0x5865F2 : 0xED4245)
+      .setColor(isJoin ? 0x06B6D4 : 0x64748B)
       .setAuthor({
         name: `${serverName} • ${isJoin ? 'Welcome Desk' : 'Departure'}`,
         iconURL: serverIcon || undefined
@@ -1742,24 +1746,27 @@ class UtilityModule {
     if (channel && welcomerConfig.enabled !== false) {
       let sent = false;
 
-      // 1. Try Canvas Graphic Card + Copy-Paste Clean Message (Matches Image 1 exactly)
+      // 1. Try Canvas Graphic Card + Modern Swiss/OLED Welcome Embed
       if (welcomerConfig.cardEnabled !== false) {
         try {
           const cardBuffer = await this.generateCard(member, welcomerConfig.theme || 'dark', 'join');
           const attachment = new AttachmentBuilder(cardBuffer, { name: 'welcome.png' });
+          const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join', inviterInfo);
           const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join', inviterInfo);
-          await channel.send({ content: textMsg, files: [attachment] });
+          await channel.send({ content: textMsg, embeds: [embed], files: [attachment] });
           sent = true;
         } catch (cardErr) {
-          console.warn('[WELCOMER] Canvas card failed, using text fallback:', cardErr.message);
+          console.warn('[WELCOMER] Canvas card failed, using embed fallback:', cardErr.message);
         }
       }
 
-      // 2. Clean Text Message Fallback
+      // 2. Clean Embed Fallback
       if (!sent) {
         try {
+          const embed = this.buildWelcomerEmbed(member, welcomerConfig, 'join', inviterInfo);
+          embed.setImage(null);
           const textMsg = this.buildWelcomerTextMessage(member, welcomerConfig, 'join', inviterInfo);
-          await channel.send({ content: textMsg });
+          await channel.send({ content: textMsg, embeds: [embed] });
           sent = true;
         } catch (textErr) {
           console.error(`[WELCOMER ERROR] Failed to send welcome message in #${channel.name}:`, textErr.message);

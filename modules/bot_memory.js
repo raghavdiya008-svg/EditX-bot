@@ -498,8 +498,16 @@ class BotMemoryModule {
         tags: (() => {
           if (!this.db.tags) return null;
           const data = {};
+          const guildChanIds = new Set(guild.channels?.cache ? Array.from(guild.channels.cache.keys()) : []);
           for (const [k, v] of this.db.tags.entries()) {
-            if (k.startsWith(`${guild.id}_`) || k.includes(guild.id)) data[k] = v;
+            if (
+              k.startsWith(`${guild.id}_`) ||
+              k.includes(guild.id) ||
+              (v && v.guildId === guild.id) ||
+              (k.startsWith('sticky_') && (guildChanIds.has(k.replace('sticky_', '')) || v?.guildId === guild.id))
+            ) {
+              data[k] = v;
+            }
           }
           return data;
         })(),

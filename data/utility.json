@@ -19,5 +19,13 @@
     "channelId": "1540707425110204586",
     "roleId": "1538964380090245221",
     "updatedAt": 1789319722074
-  }
+  },
+  "directives_1538957031455596544": [
+    {
+      "id": "dir_1790519369287",
+      "text": "[#general-chat Directive] Strict prohibition on promotional messages, service advertisements, or portfolio links in general chat.",
+      "createdBy": "1320083615475830797",
+      "createdAt": 1790519369287
+    }
+  ]
 }
