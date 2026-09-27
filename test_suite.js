@@ -2405,7 +2405,8 @@ async function runTests() {
 
     await dmMod.handleDirectMessage(readyMessage);
     assert.strictEqual(readyReplies.length, 1, 'Bot must reply to user on READY');
-    assert.ok(readyReplies[0].embeds[0].data.title.includes('READY'), 'Reply must confirm subscription');
+    const replyText = readyReplies[0].content || readyReplies[0].embeds?.[0]?.data?.title || '';
+    assert.ok(replyText.toLowerCase().includes('subscribed') || replyText.includes('READY'), 'Reply must confirm subscription');
 
     const subscribers = db.dm.get(`subscribers_${dmGuild.id}`);
     assert.ok(subscribers && subscribers['member_user_111'], 'Member must be registered in subscribers database');
@@ -2462,7 +2463,8 @@ async function runTests() {
     const handledModal = await dmMod.handleInteraction(mockModalSubmitInteraction);
     assert.strictEqual(handledModal, true, 'Module must handle dmreply_modal_ submission');
     assert.strictEqual(memberDMs.length, 1, 'Response must be delivered to member DM');
-    assert.ok(memberDMs[0].embeds[0].data.description.includes('After Effects 2024'), 'Member DM must contain staff reply');
+    const modalText = memberDMs[0].content || memberDMs[0].embeds?.[0]?.data?.description || '';
+    assert.ok(modalText.includes('After Effects 2024'), 'Member DM must contain staff reply');
     assert.ok(modalReplyMessage.content.includes('Delivered response'), 'Staff receives confirmation');
 
     // 5. Test DM Emoji Reaction Tracking -> Alerts Admin DM
@@ -2503,7 +2505,8 @@ async function runTests() {
     await dmMod.handleCommand(mockBlastInteraction);
     assert.ok(broadcastEditReply && broadcastEditReply.content.includes('Delivered: **1 member(s)**'), 'Must broadcast to subscriber');
     assert.strictEqual(memberDMs.length, 2, 'Member must receive broadcast announcement in DM');
-    assert.ok(memberDMs[1].embeds[0].data.description.includes('Special Announcement'), 'Member DM must match broadcast text');
+    const bcastText = memberDMs[1].content || memberDMs[1].embeds?.[0]?.data?.description || '';
+    assert.ok(bcastText.includes('Special Announcement'), 'Member DM must match broadcast text');
 
     // 7. Test Member Acknowledgment Button Click
     let ackUpdate = null;
@@ -2642,7 +2645,8 @@ async function runTests() {
     const handled = await dmMod.handleGuildMessage(adminChannelReply);
     assert.strictEqual(handled, true, 'Module must process reply in reports channel');
     assert.strictEqual(deliveredDMsToMember.length, 1, 'Admin reply must be delivered to member DMs');
-    assert.ok(deliveredDMsToMember[0].embeds[0].data.description.includes('looks great'), 'Member must receive staff reply content');
+    const deliveredText = deliveredDMsToMember[0].content || deliveredDMsToMember[0].embeds?.[0]?.data?.description || '';
+    assert.ok(deliveredText.includes('looks great'), 'Member must receive staff reply content');
     assert.ok(adminConfirmation && adminConfirmation.content.includes(`Sent to <@${memberUser.id}>`), 'Admin must receive in-chat confirmation quoting the reply');
     assert.ok(adminConfirmation.content.includes('looks great'), 'Confirmation must quote the reply content');
 
@@ -2895,7 +2899,8 @@ async function runTests() {
     const handledA = await dmReminder.handleDmDispatchCommand(msgA);
     assert.strictEqual(handledA, true, 'Must handle mention DM dispatch');
     assert.strictEqual(dmDispatches.length, 1, 'Target user must receive DM');
-    assert.ok(dmDispatches[0].embeds[0].data.description.includes('Please check your ticket regarding your project'), 'DM content must match');
+    const textA = dmDispatches[0].content || dmDispatches[0].embeds?.[0]?.data?.description || '';
+    assert.ok(textA.includes('Please check your ticket regarding your project'), 'DM content must match');
     assert.ok(replyA && replyA.content.includes('Direct message delivered to <@recipient_99999>'), 'Staff must receive in-chat confirmation');
 
     // Scenario B: Reply to a user\'s message saying "@EditX dm this person Please verify your submission"
@@ -2919,7 +2924,8 @@ async function runTests() {
     const handledB = await dmReminder.handleDmDispatchCommand(msgB);
     assert.strictEqual(handledB, true, 'Must handle reply reference DM dispatch');
     assert.strictEqual(dmDispatches.length, 1, 'Referenced user must receive DM');
-    assert.ok(dmDispatches[0].embeds[0].data.description.includes('Please verify your submission'), 'DM must contain message');
+    const textB = dmDispatches[0].content || dmDispatches[0].embeds?.[0]?.data?.description || '';
+    assert.ok(textB.includes('Please verify your submission'), 'DM must contain message');
     assert.ok(replyB && replyB.content.includes('Direct message delivered to <@recipient_99999>'), 'Staff must receive in-chat confirmation');
 
     // Scenario C: Non-staff member attempts to use it -> Permission Denied

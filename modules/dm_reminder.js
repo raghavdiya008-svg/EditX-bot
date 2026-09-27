@@ -255,19 +255,9 @@ class DMReminderModule {
         }
       }
 
-      const confirmEmbed = new EmbedBuilder()
-        .setColor(0x10B981)
-        .setTitle('✅ You are Marked READY!')
-        .setDescription(
-          `Awesome! You have successfully subscribed to direct updates, reminders, and alerts from **${registeredGuildNames.join(', ') || 'our community'}**.\n\n` +
-          `▸ ⏰ You will receive key announcements and alerts directly in this DM.\n` +
-          `▸ 💬 You can reply directly here at any time to reach staff.\n` +
-          `▸ 🛑 Type \`STOP\` anytime if you wish to unsubscribe.`
-        )
-        .setFooter({ text: 'EditX Reminder Dispatcher • Subscription Active' })
-        .setTimestamp();
-
-      await message.reply({ embeds: [confirmEmbed] }).catch(() => {});
+      await message.reply({
+        content: `Awesome, you're subscribed to direct updates from **${registeredGuildNames.join(', ') || 'our community'}**!\n> You can reply directly to this message anytime to reach staff. Type \`STOP\` anytime to unsubscribe.`
+      }).catch(() => {});
       return;
     }
 
@@ -402,19 +392,10 @@ class DMReminderModule {
     const replyContent = (message.content || '').trim();
     if (!replyContent) return false;
 
-    const staffEmbed = new EmbedBuilder()
-      .setColor(0x5865F2)
-      .setAuthor({
-        name: `${message.guild.name} • Staff Response`,
-        iconURL: (message.guild.iconURL && typeof message.guild.iconURL === 'function') ? message.guild.iconURL({ dynamic: true }) : undefined
-      })
-      .setTitle('📬 Response from Server Staff')
-      .setDescription(replyContent)
-      .setFooter({ text: 'You can reply directly to this message.' })
-      .setTimestamp();
-
     try {
-      await targetUser.send({ embeds: [staffEmbed] });
+      await targetUser.send({
+        content: `${replyContent}\n\n-# 💬 *From ${message.guild.name} Staff • Reply directly here anytime.*`
+      });
       await message.reply({ content: `✅ Sent to <@${targetUserId}>:\n> ${replyContent}` }).catch(() => {});
       return true;
     } catch (err) {
@@ -465,16 +446,10 @@ class DMReminderModule {
       const guild = interaction.guild || (this.client.guilds?.cache ? Array.from(this.client.guilds.cache.values())[0] : null);
       const serverTitle = guild ? guild.name : 'Server Staff';
 
-      const staffEmbed = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setAuthor({ name: `${serverTitle} • Staff Response`, iconURL: guild?.iconURL() || undefined })
-        .setTitle('📬 Message from Server Staff')
-        .setDescription(replyText)
-        .setFooter({ text: 'You can reply directly to this message anytime.' })
-        .setTimestamp();
-
       try {
-        await targetUser.send({ embeds: [staffEmbed] });
+        await targetUser.send({
+          content: `${replyText}\n\n-# 💬 *From ${serverTitle} Staff • Reply directly here anytime.*`
+        });
         await interaction.reply({ content: `✅ **Delivered response to <@${targetUserId}>!**\n> ${replyText.slice(0, 100)}...`, ephemeral: true });
       } catch (err) {
         await interaction.reply({ content: `❌ Failed to send DM to <@${targetUserId}> (They may have DMs closed or blocked the bot): ${err.message}`, ephemeral: true });
@@ -588,23 +563,10 @@ class DMReminderModule {
       // /dmblast test
       if (sub === 'test') {
         const text = options.getString('message');
-        const testEmbed = new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setAuthor({ name: `${guild.name} • Reminder Broadcast (TEST)`, iconURL: guild.iconURL() || undefined })
-          .setTitle('🔔 Community Reminder')
-          .setDescription(text)
-          .setFooter({ text: 'This was a test preview sent only to you.' })
-          .setTimestamp();
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`ack_dm_test`)
-            .setLabel('👍 Acknowledge')
-            .setStyle(ButtonStyle.Success)
-        );
+        const testContent = `🧪 **[TEST PREVIEW]** Hey! Here's an update from **${guild.name}**:\n\n${text}\n\n-# 💬 *Reply directly to this message if you have any questions or want to reach staff.*`;
 
         try {
-          await user.send({ embeds: [testEmbed], components: [row] });
+          await user.send({ content: testContent });
           await interaction.reply({ content: '✅ Test reminder dispatched to your personal DM! Check your direct messages.', ephemeral: true });
         } catch (err) {
           await interaction.reply({ content: `❌ Could not send test DM: ${err.message}. Make sure your DMs are open.`, ephemeral: true });
@@ -773,25 +735,12 @@ class DMReminderModule {
           return true;
         }
 
-        const broadcastId = `bcast_${Date.now()}`;
-        const reminderEmbed = new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setAuthor({ name: `${guild.name} • Important Reminder`, iconURL: guild.iconURL() || undefined })
-          .setTitle('🔔 Community Reminder & Update')
-          .setDescription(messageText)
-          .setFooter({ text: `${guild.name} • Tap below to acknowledge or reply directly to reach staff` })
-          .setTimestamp();
+        const broadcastContent = `Hey! Here's an update from **${guild.name}**:\n\n${messageText}\n\n-# 💬 *Reply directly to this message to reach staff • Type STOP to unsubscribe.*`;
 
+        const dmPayload = { content: broadcastContent };
         if (imageUrl) {
-          reminderEmbed.setImage(imageUrl);
+          dmPayload.files = [imageUrl];
         }
-
-        const actionRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`ack_dm_${broadcastId}`)
-            .setLabel(buttonLabel)
-            .setStyle(ButtonStyle.Primary)
-        );
 
         let success = 0;
         let failed = 0;
@@ -800,7 +749,7 @@ class DMReminderModule {
           try {
             const memberUser = await this.client.users.fetch(subItem.userId).catch(() => null);
             if (memberUser) {
-              await memberUser.send({ embeds: [reminderEmbed], components: [actionRow] });
+              await memberUser.send(dmPayload);
               success++;
             } else {
               failed++;
@@ -914,24 +863,11 @@ class DMReminderModule {
       return true;
     }
 
-    // 3. Send DM to Target User
+    // 3. Send DM to Target User (clean and direct, no template box)
     try {
-      const dmEmbed = new EmbedBuilder()
-        .setColor(0x06B6D4)
-        .setAuthor({
-          name: `${message.guild.name} • Official Direct Message`,
-          iconURL: (message.guild.iconURL && typeof message.guild.iconURL === 'function') ? message.guild.iconURL({ dynamic: true }) : undefined
-        })
-        .setDescription(
-          `### 📩 Direct Message from Staff\n\n` +
-          `> **${text}**\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `-# 💬 You can reply directly in this DM to contact server staff • Sent by <@${message.author.id}> from #${message.channel.name}`
-        )
-        .setFooter({ text: `${message.guild.name} Support & Staff Desk` })
-        .setTimestamp();
-
-      await targetUser.send({ embeds: [dmEmbed] });
+      await targetUser.send({
+        content: `Hey! Message from **${message.guild.name}** staff:\n\n${text}\n\n-# 💬 *Sent by <@${message.author.id}> from #${message.channel.name} • Reply directly here to contact staff.*`
+      });
 
       await message.reply({
         content: `✅ **Direct message delivered to <@${targetUser.id}> (\`${targetUser.tag || targetUser.username}\`)!**\n> "${text.slice(0, 150)}${text.length > 150 ? '...' : ''}"`
