@@ -256,17 +256,20 @@ class TicketsModule {
 
     const htmlRows = sorted.map(m => {
       const time = m.createdAt.toLocaleTimeString();
-      const author = m.author ? m.author.tag : 'Unknown';
+      const author = m.author ? (m.author.tag || m.author.username) : 'Unknown';
+      const isBot = m.author?.bot;
       const content = m.cleanContent ? m.cleanContent.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
-      const attachments = m.attachments.map(a => `<div style="margin-top:4px;"><a href="${a.url}" target="_blank" style="color:#5865F2;">📎 Attachment: ${a.name}</a></div>`).join('');
-      const embeds = m.embeds.map(e => `<div style="border-left:4px solid #5865F2; padding:4px 8px; margin-top:4px; background:#2b2d31;"><strong>${e.title || ''}</strong><p>${e.description || ''}</p></div>`).join('');
+      const attachments = m.attachments.map(a => `<div style="margin-top:8px;"><a href="${a.url}" target="_blank" style="display:inline-flex; align-items:center; gap:6px; color:#00F0FF; background:#161922; border:1px solid rgba(0,240,255,0.25); border-radius:6px; padding:4px 10px; font-size:12px; text-decoration:none;">📎 ${a.name}</a></div>`).join('');
+      const embeds = m.embeds.map(e => `<div style="border-left:3px solid #06B6D4; border-radius:0 6px 6px 0; padding:8px 12px; margin-top:8px; background:#151821; border-top:1px solid rgba(255,255,255,0.05); border-right:1px solid rgba(255,255,255,0.05); border-bottom:1px solid rgba(255,255,255,0.05);"><strong style="color:#FFFFFF; font-size:13px;">${e.title || ''}</strong><p style="color:#CBD5E1; margin:4px 0 0 0; font-size:13px; line-height:1.5;">${e.description || ''}</p></div>`).join('');
 
       return `
-        <div style="margin-bottom: 12px; padding: 8px; background: #1e1f22; border-radius: 6px;">
-          <div style="font-size: 13px; color: #94a3b8; margin-bottom: 4px;">
-            <strong style="color: #ffffff; font-size: 14px;">${author}</strong> <span style="font-size:11px; margin-left:8px;">${time}</span>
+        <div style="margin-bottom: 12px; padding: 12px 14px; background: #101218; border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+            <strong style="color: #FFFFFF; font-size: 14px; font-weight: 600;">${author}</strong>
+            ${isBot ? '<span style="background:rgba(6,182,212,0.18); color:#00F0FF; border:1px solid rgba(6,182,212,0.4); font-size:10px; font-weight:700; padding:1px 5px; border-radius:4px; text-transform:uppercase;">BOT</span>' : ''}
+            <span style="font-size: 11px; color: #64748B; font-family: monospace;">${time}</span>
           </div>
-          <div style="color: #dcddde; font-size: 14px; white-space: pre-wrap;">${content}</div>
+          <div style="color: #E2E8F0; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap;">${content}</div>
           ${attachments}
           ${embeds}
         </div>
@@ -274,22 +277,30 @@ class TicketsModule {
     }).join('\n');
 
     const html = `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title}</title>
   <style>
-    body { background: #111214; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 24px; }
-    .header { border-bottom: 1px solid #2b2d31; padding-bottom: 16px; margin-bottom: 20px; }
-    .header h1 { margin: 0; font-size: 22px; color: #5865F2; }
-    .header p { margin: 4px 0 0 0; color: #94a3b8; font-size: 13px; }
+    body { background: #08090C; color: #E2E8F0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; padding: 24px; max-width: 900px; margin: 0 auto; -webkit-font-smoothing: antialiased; }
+    .header { background: #0E1017; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 18px 20px; margin-bottom: 24px; }
+    .header h1 { margin: 0; font-size: 20px; color: #FFFFFF; font-weight: 700; letter-spacing: -0.02em; }
+    .header .meta { margin-top: 8px; font-size: 12.5px; color: #94A3B8; display: flex; flex-wrap: wrap; gap: 16px; font-family: monospace; }
+    .badge { display: inline-block; background: rgba(6, 182, 212, 0.15); color: #00F0FF; border: 1px solid rgba(6, 182, 212, 0.35); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>${title}</h1>
-    <p>Server: ${channel.guild.name} | Exported on: ${dateStr}</p>
-    ${ticketInfo ? `<p>Opener ID: ${ticketInfo.openerId} | Department: ${ticketInfo.category}</p>` : ''}
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <h1>${title}</h1>
+      <span class="badge">OFFICIAL TRANSCRIPT</span>
+    </div>
+    <div class="meta">
+      <span>SERVER: <strong>${channel.guild.name}</strong></span>
+      <span>EXPORTED: <strong>${dateStr}</strong></span>
+      ${ticketInfo ? `<span>OPENER: <strong>${ticketInfo.openerId}</strong></span><span>DEPT: <strong>${ticketInfo.category}</strong></span>` : ''}
+    </div>
   </div>
   ${htmlRows}
 </body>

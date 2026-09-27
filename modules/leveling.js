@@ -198,50 +198,29 @@ class LevelingModule {
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
 
-    // 1. Deep Obsidian / Midnight Glass Background
-    const bgGrad = ctx.createLinearGradient(0, 0, width, height);
-    bgGrad.addColorStop(0, '#0B0D13');
-    bgGrad.addColorStop(0.5, '#121520');
-    bgGrad.addColorStop(1, '#1A1D2B');
-    ctx.fillStyle = bgGrad;
+    // 1. High-Contrast Precision Obsidian Canvas (Swiss / OLED Minimalist)
+    ctx.fillStyle = '#08090C';
     ctx.beginPath();
-    ctx.roundRect(0, 0, width, height, 20);
+    ctx.roundRect(0, 0, width, height, 16);
     ctx.fill();
 
-    // 2. Ambient Lighting Glow (Top-Right & Bottom-Left)
-    const glow1 = ctx.createRadialGradient(width - 80, 40, 10, width - 80, 40, 260);
-    glow1.addColorStop(0, 'rgba(99, 102, 241, 0.22)');
-    glow1.addColorStop(1, 'rgba(99, 102, 241, 0)');
-    ctx.fillStyle = glow1;
+    // 2. Interior Precision Card Inset
+    ctx.fillStyle = '#0E1017';
     ctx.beginPath();
-    ctx.roundRect(0, 0, width, height, 20);
+    ctx.roundRect(8, 8, width - 16, height - 16, 12);
     ctx.fill();
 
-    const glow2 = ctx.createRadialGradient(100, height - 20, 10, 100, height - 20, 200);
-    glow2.addColorStop(0, 'rgba(236, 72, 153, 0.15)');
-    glow2.addColorStop(1, 'rgba(236, 72, 153, 0)');
-    ctx.fillStyle = glow2;
+    // 3. Crisp Precision Border
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
     ctx.beginPath();
-    ctx.roundRect(0, 0, width, height, 20);
-    ctx.fill();
-
-    // 3. Subtle Frosted Glass Border
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-    ctx.beginPath();
-    ctx.roundRect(1, 1, width - 2, height - 2, 20);
+    ctx.roundRect(8, 8, width - 16, height - 16, 12);
     ctx.stroke();
 
-    // 4. Avatar with Double Glow Rings
+    // 4. Avatar with Crisp White Frame
     const avatarX = 115;
     const avatarY = 130;
     const avatarRadius = 65;
-
-    // Outer Halo
-    ctx.beginPath();
-    ctx.arc(avatarX, avatarY, avatarRadius + 8, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(99, 102, 241, 0.15)';
-    ctx.fill();
 
     // Avatar Image
     try {
@@ -256,104 +235,99 @@ class LevelingModule {
       ctx.restore();
     } catch (e) {}
 
-    // Gradient Ring around Avatar
-    const ringGrad = ctx.createLinearGradient(avatarX - avatarRadius, avatarY - avatarRadius, avatarX + avatarRadius, avatarY + avatarRadius);
-    ringGrad.addColorStop(0, '#6366F1');
-    ringGrad.addColorStop(0.5, '#A855F7');
-    ringGrad.addColorStop(1, '#EC4899');
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = ringGrad;
+    // Sharp White Precision Avatar Ring
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = '#FFFFFF';
     ctx.beginPath();
     ctx.arc(avatarX, avatarY, avatarRadius, 0, Math.PI * 2);
     ctx.stroke();
 
-    // 5. Username & Subtitle
-    ctx.font = 'bold 34px sans-serif';
+    // 5. Username & Subtitle (Swiss Typography Hierarchy)
+    ctx.font = 'bold 32px sans-serif';
     ctx.fillStyle = '#FFFFFF';
     let name = user.username || 'User';
     if (name.length > 13) name = name.substring(0, 13) + '...';
     ctx.fillText(name, 215, 88);
 
-    ctx.font = 'bold 15px sans-serif';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-    ctx.fillText('SERVER PARTICIPANT PROFILE', 215, 118);
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillStyle = '#94A3B8';
+    ctx.fillText('CREATIVE COMMUNITY PROFILE', 215, 116);
 
-    // 6. Modern Glass Badges: Rank & Level
+    // 6. Modern Precision Badges: Rank & Level
     // Rank Badge Capsule
     const rankText = `RANK #${rank}`;
-    ctx.font = 'bold 16px sans-serif';
+    ctx.font = 'bold 15px sans-serif';
     const rankMetrics = ctx.measureText(rankText);
-    const rankPillW = rankMetrics.width + 30;
+    const rankPillW = rankMetrics.width + 28;
     const rankPillX = width - rankPillW - 35;
     const rankPillY = 60;
 
     ctx.fillStyle = 'rgba(245, 158, 11, 0.12)';
     ctx.beginPath();
-    ctx.roundRect(rankPillX, rankPillY, rankPillW, 36, 18);
+    ctx.roundRect(rankPillX, rankPillY, rankPillW, 34, 8);
     ctx.fill();
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(245, 158, 11, 0.4)';
+    ctx.strokeStyle = '#F59E0B';
     ctx.stroke();
 
     ctx.fillStyle = '#FBBF24';
-    ctx.fillText(rankText, rankPillX + 15, rankPillY + 24);
+    ctx.fillText(rankText, rankPillX + 14, rankPillY + 23);
 
     // Level Badge Capsule
     const levelText = `LEVEL ${level}`;
     const levelMetrics = ctx.measureText(levelText);
-    const levelPillW = levelMetrics.width + 30;
+    const levelPillW = levelMetrics.width + 28;
     const levelPillX = rankPillX - levelPillW - 14;
     const levelPillY = 60;
 
-    ctx.fillStyle = 'rgba(99, 102, 241, 0.15)';
+    ctx.fillStyle = 'rgba(6, 182, 212, 0.12)';
     ctx.beginPath();
-    ctx.roundRect(levelPillX, levelPillY, levelPillW, 36, 18);
+    ctx.roundRect(levelPillX, levelPillY, levelPillW, 34, 8);
     ctx.fill();
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(99, 102, 241, 0.4)';
+    ctx.strokeStyle = '#06B6D4';
     ctx.stroke();
 
-    ctx.fillStyle = '#A5B4FC';
-    ctx.fillText(levelText, levelPillX + 15, levelPillY + 24);
+    ctx.fillStyle = '#22D3EE';
+    ctx.fillText(levelText, levelPillX + 14, levelPillY + 23);
 
-    // 7. XP Progress Bar
+    // 7. XP Progress Bar (Clean High-Contrast Cyan & Obsidian Track)
     const barX = 215;
     const barY = 168;
     const barW = width - barX - 35;
-    const barH = 24;
+    const barH = 22;
 
     // Track Background
-    ctx.fillStyle = '#1A1D2B';
+    ctx.fillStyle = '#141720';
     ctx.beginPath();
-    ctx.roundRect(barX, barY, barW, barH, 12);
+    ctx.roundRect(barX, barY, barW, barH, 6);
     ctx.fill();
     ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
     ctx.stroke();
 
-    // Fill
+    // Fill (High-Contrast Electric Cyan)
     const progress = Math.min(1, Math.max(0, currentXP / nextXP));
     if (progress > 0) {
-      const fillW = Math.max(24, barW * progress);
+      const fillW = Math.max(16, barW * progress);
       const fillGrad = ctx.createLinearGradient(barX, 0, barX + fillW, 0);
-      fillGrad.addColorStop(0, '#6366F1');
-      fillGrad.addColorStop(0.5, '#A855F7');
-      fillGrad.addColorStop(1, '#06B6D4');
+      fillGrad.addColorStop(0, '#06B6D4');
+      fillGrad.addColorStop(1, '#00F0FF');
       ctx.fillStyle = fillGrad;
       ctx.beginPath();
-      ctx.roundRect(barX, barY, fillW, barH, 12);
+      ctx.roundRect(barX, barY, fillW, barH, 6);
       ctx.fill();
     }
 
     // XP Numbers & Percentage
-    ctx.font = 'bold 16px sans-serif';
-    ctx.fillStyle = '#94A3B8';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillStyle = '#E2E8F0';
     const xpString = `${currentXP.toLocaleString()} / ${nextXP.toLocaleString()} XP`;
     ctx.fillText(xpString, barX, barY - 14);
 
     const percentText = `${Math.round(progress * 100)}%`;
-    ctx.font = 'bold 16px sans-serif';
-    ctx.fillStyle = '#38BDF8';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillStyle = '#00F0FF';
     const pWidth = ctx.measureText(percentText).width;
     ctx.fillText(percentText, barX + barW - pWidth, barY - 14);
 

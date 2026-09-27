@@ -528,7 +528,7 @@ class DecorationModule {
 
     if (type === 'rules') {
       return new EmbedBuilder()
-        .setColor(0x5865F2)
+        .setColor(0x0F172A)
         .setTitle(`📜・COMMUNITY GUIDELINES // ${guild.name}`)
         .setDescription(
           `Welcome to **${guild.name}**! To maintain a productive, creative, and safe environment for all members, please review our official rules.\n` +
@@ -551,7 +551,7 @@ class DecorationModule {
 
     if (type === 'welcome') {
       return new EmbedBuilder()
-        .setColor(0x9B59B6)
+        .setColor(0x06B6D4)
         .setTitle(`👋・WELCOME TO ${guild.name.toUpperCase()} // QUICKSTART`)
         .setDescription(
           `We are a premier network for video editors, VFX artists, sound designers, and content creators!\n` +
@@ -570,7 +570,7 @@ class DecorationModule {
 
     if (type === 'editors_guide') {
       return new EmbedBuilder()
-        .setColor(0xE67E22)
+        .setColor(0xF59E0B)
         .setTitle(`🎬・EDITORS SHOWCASE & SUBMISSION GUIDE`)
         .setDescription(
           `Maximize engagement and receive the best feedback on your video edits!\n` +
@@ -587,7 +587,7 @@ class DecorationModule {
 
     // Default: FAQ
     return new EmbedBuilder()
-      .setColor(0x3498DB)
+      .setColor(0x10B981)
       .setTitle(`❓・FREQUENTLY ASKED QUESTIONS // FAQ`)
       .setDescription(
         `Frequently asked questions regarding server navigation and tools:\n` +

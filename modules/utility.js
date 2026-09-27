@@ -1284,29 +1284,22 @@ class UtilityModule {
       ctx.fillRect(0, 0, width, height);
       ctx.restore();
     } else {
-      // Clean, elegant obsidian luxury card background
-      const darkGrad = ctx.createLinearGradient(0, 0, width, height);
-      darkGrad.addColorStop(0, '#0F1117');
-      darkGrad.addColorStop(0.5, '#141721');
-      darkGrad.addColorStop(1, '#1A1D2B');
-      ctx.fillStyle = darkGrad;
+      // High-Contrast Precision Obsidian Canvas (Swiss / OLED Minimalist)
+      ctx.fillStyle = '#08090C';
       ctx.beginPath();
       ctx.roundRect(0, 0, width, height, 16);
       ctx.fill();
 
-      // Subtle ambient avatar glow
-      const avatarGlow = ctx.createRadialGradient(100, 105, 10, 100, 105, 160);
-      avatarGlow.addColorStop(0, isJoin ? 'rgba(99, 102, 241, 0.28)' : 'rgba(239, 68, 68, 0.25)');
-      avatarGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = avatarGlow;
+      // Precision Interior Inset
+      ctx.fillStyle = '#0E1017';
       ctx.beginPath();
-      ctx.roundRect(0, 0, width, height, 16);
+      ctx.roundRect(4, 4, width - 8, height - 8, 12);
       ctx.fill();
     }
 
-    // Outer crisp border
+    // Outer crisp precision border
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
     ctx.beginPath();
     ctx.roundRect(1, 1, width - 2, height - 2, 16);
     ctx.stroke();
