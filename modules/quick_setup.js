@@ -307,15 +307,14 @@ class QuickSetupModule {
         results.logging = `⚠️ Logging configuration notice: ${err.message}`;
       }
 
-      // --- G. AUTOROLE (Carl-bot Replacement) ---
+      // --- G. AUTOROLE (Disabled by default to protect verification gates) ---
       try {
-        const memberRole = guild.roles.cache.find(r => r.name.toLowerCase().includes('member'));
-        if (memberRole) {
-          const cfgDb = this.db.config;
-          const currentCfg = cfgDb.get(guild.id) || {};
-          currentCfg.autoRoleId = memberRole.id;
-          cfgDb.set(guild.id, currentCfg);
-          results.autorole = `🟢 Linked to <@&${memberRole.id}> (Auto-granted to new members on arrival)`;
+        const cfgDb = this.db.config;
+        const currentCfg = cfgDb.get(guild.id) || {};
+        if (currentCfg.autoRoleEnabled && currentCfg.autoRoleId) {
+          results.autorole = `🟢 Active: <@&${currentCfg.autoRoleId}>`;
+        } else {
+          results.autorole = `⚪ Disabled (Manual configuration via /autorole set)`;
         }
       } catch (err) {
         // optional non-fatal

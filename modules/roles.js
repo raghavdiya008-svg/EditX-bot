@@ -514,6 +514,16 @@ class RolesModule {
     if (!member || !member.guild) return;
     const guildConfig = this.db.get(member.guild.id) || {};
 
+    // 0. VERIFICATION GATE PROTECTION:
+    // If the server uses Discord Member Verification Gate or has a #verify-here / Wick gate,
+    // NEVER grant auto-roles on arrival, as doing so completely bypasses server verification.
+    const hasVerificationGate = (member.guild.features && member.guild.features.includes('MEMBER_VERIFICATION_GATE_ENABLED')) ||
+      (member.guild.channels?.cache && Array.from(member.guild.channels.cache.values()).some(c => c && c.name && (c.name.includes('verify') || c.name.includes('verification'))));
+
+    if ((hasVerificationGate && !guildConfig.bypassVerification) || guildConfig.autoRoleDisabled === true) {
+      return;
+    }
+
     // 1. Auto-Role (configured or auto-detected default member role)
     let roleId = guildConfig.autoRoleId;
     if (!roleId && member.guild.roles?.cache) {
@@ -525,7 +535,6 @@ class RolesModule {
         roleId = defaultRole.id;
         guildConfig.autoRoleId = roleId;
         this.db.set(member.guild.id, guildConfig);
-        console.log(`[AUTOROLE] Auto-detected and linked member role: @${defaultRole.name} (${defaultRole.id})`);
       }
     }
 
