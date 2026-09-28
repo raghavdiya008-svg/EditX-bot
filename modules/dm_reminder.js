@@ -200,14 +200,25 @@ class DMReminderModule {
 
   /**
    * Retrieves all shared guilds between a user and this bot client
+   * Strictly checks cache and fetches member if needed. Never returns non-member guilds!
    */
-  getSharedGuilds(user) {
-    if (!this.client?.guilds?.cache) return [];
+  async getSharedGuilds(user) {
+    if (!this.client?.guilds?.cache || !user?.id) return [];
     const allGuilds = Array.from(this.client.guilds.cache.values());
-    const matched = allGuilds.filter(g =>
-      g.members?.cache?.has(user.id) || g.members?.resolve?.(user.id)
-    );
-    return matched.length > 0 ? matched : allGuilds;
+    const matched = [];
+    for (const g of allGuilds) {
+      if (!g) continue;
+      if (g.members?.cache?.has(user.id) || g.members?.resolve?.(user.id)) {
+        matched.push(g);
+      } else if (g.members?.fetch) {
+        try {
+          const m = await g.members.fetch(user.id).catch(() => null);
+          if (m) matched.push(g);
+        } catch (_) {}
+      }
+    }
+    // Strictly return only guilds where the member is actually verified to be present!
+    return matched;
   }
 
   /**
@@ -220,15 +231,43 @@ class DMReminderModule {
     const upper = content.toUpperCase();
     const author = message.author;
 
-    // Find guild context
-    const sharedGuilds = this.getSharedGuilds(author);
-    const primaryGuild = sharedGuilds[0] || (this.client.guilds?.cache ? Array.from(this.client.guilds.cache.values())[0] : null);
+    // Strictly find guilds where the user is an actual member
+    const sharedGuilds = await this.getSharedGuilds(author);
+    if (!sharedGuilds || sharedGuilds.length === 0) return;
+
+    // Check if the user has an active conversation with a specific guild
+    const activeGuildId = this.db.get(`user_active_guild_${author.id}`) || this.utilDb.get(`user_active_guild_${author.id}`);
+    let targetGuild = null;
+
+    if (activeGuildId) {
+      targetGuild = sharedGuilds.find(g => g.id === activeGuildId) || null;
+    }
+
+    // If no active interaction guild, match by active subscription
+    if (!targetGuild) {
+      for (const g of sharedGuilds) {
+        const subs = this.db.get(`subscribers_${g.id}`) || {};
+        if (subs[author.id]?.active) {
+          targetGuild = g;
+          break;
+        }
+      }
+    }
+
+    // Default to the first actual shared guild
+    if (!targetGuild) {
+      targetGuild = sharedGuilds[0];
+    }
 
     // 1. OPT-IN KEYWORD: "READY"
     if (upper === 'READY' || upper.startsWith('READY!') || upper.startsWith('READY ') || upper === 'I AM READY' || upper === "I'M READY") {
       let registeredGuildNames = [];
 
-      for (const g of (sharedGuilds.length > 0 ? sharedGuilds : (primaryGuild ? [primaryGuild] : []))) {
+      // If user has an active guild context, only subscribe to that guild!
+      // Otherwise, subscribe ONLY to guilds the user is actually in.
+      const targetGuilds = (activeGuildId && targetGuild) ? [targetGuild] : sharedGuilds;
+
+      for (const g of targetGuilds) {
         const key = `subscribers_${g.id}`;
         const subs = this.db.get(key) || {};
         subs[author.id] = {
@@ -263,7 +302,8 @@ class DMReminderModule {
 
     // 2. OPT-OUT KEYWORD: "STOP" or "UNSUBSCRIBE"
     if (upper === 'STOP' || upper === 'UNSUBSCRIBE' || upper === 'CANCEL') {
-      for (const g of (sharedGuilds.length > 0 ? sharedGuilds : (primaryGuild ? [primaryGuild] : []))) {
+      const targetGuilds = (activeGuildId && targetGuild) ? [targetGuild] : sharedGuilds;
+      for (const g of targetGuilds) {
         const key = `subscribers_${g.id}`;
         const subs = this.db.get(key) || {};
         if (subs[author.id]) {
@@ -278,9 +318,9 @@ class DMReminderModule {
       }).catch(() => {});
     }
 
-    // 3. TWO-WAY DM RELAY: Forward Member Message to Admin DM or Reports Channel
-    if (primaryGuild) {
-      const dest = await this.getReportDestination(primaryGuild);
+    // 3. TWO-WAY DM RELAY: Forward Member Message to the target guild's reports channel
+    if (targetGuild) {
+      const dest = await this.getReportDestination(targetGuild);
       if (dest) {
         // If the message is from the admin themselves, check for !reply prefix
         if (dest.type === 'user' && dest.target.id === author.id) {
@@ -337,11 +377,14 @@ class DMReminderModule {
     if (!reaction || user.bot) return;
 
     try {
-      const sharedGuilds = this.getSharedGuilds(user);
-      const primaryGuild = sharedGuilds[0] || (this.client.guilds?.cache ? Array.from(this.client.guilds.cache.values())[0] : null);
-      if (!primaryGuild) return;
+      const sharedGuilds = await this.getSharedGuilds(user);
+      if (!sharedGuilds || sharedGuilds.length === 0) return;
 
-      const dest = await this.getReportDestination(primaryGuild);
+      const activeGuildId = this.db.get(`user_active_guild_${user.id}`) || this.utilDb.get(`user_active_guild_${user.id}`);
+      const targetGuild = (activeGuildId && sharedGuilds.find(g => g.id === activeGuildId)) || sharedGuilds[0];
+      if (!targetGuild) return;
+
+      const dest = await this.getReportDestination(targetGuild);
       if (!dest || (dest.type === 'user' && dest.target.id === user.id)) return;
 
       const emojiStr = reaction.emoji?.id ? `<:${reaction.emoji.name}:${reaction.emoji.id}>` : (reaction.emoji?.name || '✨');
@@ -396,6 +439,11 @@ class DMReminderModule {
       await targetUser.send({
         content: `${replyContent}\n\n-# 💬 *From ${message.guild.name} Staff • Reply directly here anytime.*`
       });
+
+      // Bind active conversation context to this server
+      this.db.set(`user_active_guild_${targetUserId}`, message.guild.id);
+      this.utilDb.set(`user_active_guild_${targetUserId}`, message.guild.id);
+
       await message.reply({ content: `✅ Sent to <@${targetUserId}>:\n> ${replyContent}` }).catch(() => {});
       return true;
     } catch (err) {
@@ -450,6 +498,12 @@ class DMReminderModule {
         await targetUser.send({
           content: `${replyText}\n\n-# 💬 *From ${serverTitle} Staff • Reply directly here anytime.*`
         });
+
+        if (guild?.id) {
+          this.db.set(`user_active_guild_${targetUserId}`, guild.id);
+          this.utilDb.set(`user_active_guild_${targetUserId}`, guild.id);
+        }
+
         await interaction.reply({ content: `✅ **Delivered response to <@${targetUserId}>!**\n> ${replyText.slice(0, 100)}...`, ephemeral: true });
       } catch (err) {
         await interaction.reply({ content: `❌ Failed to send DM to <@${targetUserId}> (They may have DMs closed or blocked the bot): ${err.message}`, ephemeral: true });
@@ -474,19 +528,21 @@ class DMReminderModule {
       await interaction.update({ components: [ackRow] }).catch(() => {});
 
       // Notify Admin DM of acknowledgment
-      const sharedGuilds = this.getSharedGuilds(user);
-      const primaryGuild = sharedGuilds[0] || (this.client.guilds?.cache ? Array.from(this.client.guilds.cache.values())[0] : null);
+      const sharedGuilds = await this.getSharedGuilds(user);
+      if (sharedGuilds.length > 0) {
+        const activeGuildId = this.db.get(`user_active_guild_${user.id}`) || this.utilDb.get(`user_active_guild_${user.id}`);
+        const targetGuild = (activeGuildId && sharedGuilds.find(g => g.id === activeGuildId)) || sharedGuilds[0];
+        if (targetGuild) {
+          const dest = await this.getReportDestination(targetGuild);
+          if (dest) {
+            const ackEmbed = new EmbedBuilder()
+              .setColor(0x10B981)
+              .setTitle('✅ Reminder Acknowledged')
+              .setDescription(`👤 <@${user.id}> (**${user.tag || user.username}**) clicked Acknowledge on reminder broadcast \`#${broadcastId}\`.`)
+              .setTimestamp();
 
-      if (primaryGuild) {
-        const dest = await this.getReportDestination(primaryGuild);
-        if (dest) {
-          const ackEmbed = new EmbedBuilder()
-            .setColor(0x10B981)
-            .setTitle('✅ Reminder Acknowledged')
-            .setDescription(`👤 <@${user.id}> (**${user.tag || user.username}**) clicked Acknowledge on reminder broadcast \`#${broadcastId}\`.`)
-            .setTimestamp();
-
-          await dest.target.send({ embeds: [ackEmbed] }).catch(() => {});
+            await dest.target.send({ embeds: [ackEmbed] }).catch(() => {});
+          }
         }
       }
       return true;
@@ -700,16 +756,14 @@ class DMReminderModule {
         const target = options.getUser('target');
         const text = options.getString('message');
 
-        const replyEmbed = new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setAuthor({ name: `${guild.name} • Staff Response`, iconURL: guild.iconURL() || undefined })
-          .setTitle('📬 Message from Server Staff')
-          .setDescription(text)
-          .setFooter({ text: 'You can reply directly to this message anytime.' })
-          .setTimestamp();
-
         try {
-          await target.send({ embeds: [replyEmbed] });
+          await target.send({
+            content: `${text}\n\n-# 💬 *From ${guild.name} Staff • Reply directly here anytime.*`
+          });
+
+          this.db.set(`user_active_guild_${target.id}`, guild.id);
+          this.utilDb.set(`user_active_guild_${target.id}`, guild.id);
+
           await interaction.reply({ content: `✅ Delivered staff message to <@${target.id}>.`, ephemeral: true });
         } catch (err) {
           await interaction.reply({ content: `❌ Could not deliver DM to <@${target.id}>: ${err.message}`, ephemeral: true });
@@ -750,6 +804,8 @@ class DMReminderModule {
             const memberUser = await this.client.users.fetch(subItem.userId).catch(() => null);
             if (memberUser) {
               await memberUser.send(dmPayload);
+              this.db.set(`user_active_guild_${subItem.userId}`, guild.id);
+              this.utilDb.set(`user_active_guild_${subItem.userId}`, guild.id);
               success++;
             } else {
               failed++;
@@ -868,6 +924,9 @@ class DMReminderModule {
       await targetUser.send({
         content: `Hey! Message from **${message.guild.name}** staff:\n\n${text}\n\n-# 💬 *Sent by <@${message.author.id}> from #${message.channel.name} • Reply directly here to contact staff.*`
       });
+
+      this.db.set(`user_active_guild_${targetUser.id}`, message.guild.id);
+      this.utilDb.set(`user_active_guild_${targetUser.id}`, message.guild.id);
 
       await message.reply({
         content: `✅ **Direct message delivered to <@${targetUser.id}> (\`${targetUser.tag || targetUser.username}\`)!**\n> "${text.slice(0, 150)}${text.length > 150 ? '...' : ''}"`
