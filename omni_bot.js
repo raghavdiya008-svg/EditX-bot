@@ -13,6 +13,7 @@ const {
   EmbedBuilder,
   PermissionFlagsBits
 } = require('discord.js');
+require('dotenv').config();
 const http = require('http');
 const JSONDatabase = require('./database');
 
