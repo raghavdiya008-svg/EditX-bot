@@ -17,6 +17,7 @@ class DMReminderModule {
     this.db = db.dm || db.utility;
     this.utilDb = db.utility;
     this.secDb = db.security || db.config;
+    this.pendingGuildSelect = new Map(); // userId -> { content, attachments, timestamp }
   }
 
   getCommands() {
@@ -318,7 +319,33 @@ class DMReminderModule {
       }).catch(() => {});
     }
 
-    // 3. TWO-WAY DM RELAY: Forward Member Message to the target guild's reports channel
+    // 3. MULTI-SERVER SELECTION: If user shares multiple servers and has no active conversation context
+    if (!activeGuildId && sharedGuilds.length > 1) {
+      this.pendingGuildSelect = this.pendingGuildSelect || new Map();
+      this.pendingGuildSelect.set(author.id, {
+        content,
+        attachments: Array.from(message.attachments?.values() || []).map(a => a.url),
+        timestamp: Date.now()
+      });
+
+      const row = new ActionRowBuilder();
+      for (const g of sharedGuilds.slice(0, 5)) {
+        row.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`dmsel_${g.id}`)
+            .setLabel(g.name.slice(0, 80))
+            .setStyle(ButtonStyle.Primary)
+        );
+      }
+
+      await message.reply({
+        content: `📬 **You are a member in multiple servers with EditX!**\nPlease select which server's staff team you want to deliver this message to:`,
+        components: [row]
+      }).catch(() => {});
+      return;
+    }
+
+    // 4. TWO-WAY DM RELAY: Forward Member Message to the target guild's reports channel
     if (targetGuild) {
       const dest = await this.getReportDestination(targetGuild);
       if (dest) {
@@ -334,7 +361,7 @@ class DMReminderModule {
               if (targetUser) {
                 const staffReplyEmbed = new EmbedBuilder()
                   .setColor(0x5865F2)
-                  .setAuthor({ name: `${primaryGuild.name} Staff / Management`, iconURL: primaryGuild.iconURL() || undefined })
+                  .setAuthor({ name: `${targetGuild.name} Staff / Management`, iconURL: (targetGuild.iconURL && typeof targetGuild.iconURL === 'function') ? targetGuild.iconURL() : undefined })
                   .setTitle('📬 Response from Server Staff')
                   .setDescription(replyMsg)
                   .setFooter({ text: 'You can reply directly to this message.' })
@@ -508,6 +535,38 @@ class DMReminderModule {
       } catch (err) {
         await interaction.reply({ content: `❌ Failed to send DM to <@${targetUserId}> (They may have DMs closed or blocked the bot): ${err.message}`, ephemeral: true });
       }
+      return true;
+    }
+
+    // 2.5 Multi-Server DM Destination Selection: "dmsel_<guildId>"
+    if (isBtn && interaction.customId?.startsWith('dmsel_')) {
+      const selectedGuildId = interaction.customId.replace('dmsel_', '');
+      const guild = this.client.guilds?.cache?.get(selectedGuildId) || (await this.client.guilds.fetch(selectedGuildId).catch(() => null));
+      if (!guild) {
+        return interaction.reply({ content: '❌ Selected server is currently unavailable.', ephemeral: true });
+      }
+
+      this.db.set(`user_active_guild_${interaction.user.id}`, selectedGuildId);
+      this.utilDb.set(`user_active_guild_${interaction.user.id}`, selectedGuildId);
+
+      const pending = this.pendingGuildSelect?.get(interaction.user.id);
+      if (pending) {
+        this.pendingGuildSelect.delete(interaction.user.id);
+        const dest = await this.getReportDestination(guild);
+        if (dest) {
+          const attachmentText = pending.attachments?.length > 0 ? `\n📎 ${pending.attachments.join(' ')}` : '';
+          const reportContent = `<@${interaction.user.id}>\n${pending.content || '[Attachment/Media]'}${attachmentText}\n-# 🌐 *User selected ${guild.name}*`;
+          const sentMsg = await dest.target.send({ content: reportContent }).catch(() => null);
+          if (sentMsg?.id) {
+            this.utilDb.set(`report_msg_${sentMsg.id}`, interaction.user.id);
+          }
+        }
+      }
+
+      await interaction.update({
+        content: `✅ **Connected to ${guild.name} Staff!** Your message was forwarded to their team. Any further messages you send here will route directly to them.`,
+        components: []
+      }).catch(() => {});
       return true;
     }
 

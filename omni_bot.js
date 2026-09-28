@@ -187,10 +187,21 @@ client.once(Events.ClientReady, async () => {
 
   // Run Autonomous Auto-Pilot across all connected servers (zero manual setup required)
   for (const guild of client.guilds.cache.values()) {
-    await quickSetup.runAutoPilot(guild);
-    await utility.handleGuildCreate(guild);
-    await botMemory.initGuild(guild);
-    await dmReminder.initGuild(guild);
+    try {
+      // Ensure server nickname is cleanly customized for secondary server if not already set
+      if (guild.id === '1553818924314001450') {
+        const me = guild.members?.me || (await guild.members?.fetchMe().catch(() => null));
+        if (me && !me.nickname && me.permissions?.has(PermissionFlagsBits.ChangeNickname)) {
+          await me.setNickname('edits bot').catch(() => {});
+        }
+      }
+      await quickSetup.runAutoPilot(guild);
+      await utility.handleGuildCreate(guild);
+      await botMemory.initGuild(guild);
+      await dmReminder.initGuild(guild);
+    } catch (gInitErr) {
+      console.error(`[GUILD INIT ERROR ${guild.id}]:`, gInitErr.message);
+    }
   }
   console.log(`[AUTOPILOT] 100% Autonomous server operations online for ${client.guilds.cache.size} guild(s).`);
 
@@ -215,21 +226,39 @@ client.on(Events.GuildCreate, async (guild) => {
   } catch (err) {
     console.warn(`[GUILD REGISTRY] Could not sync commands for ${guild.name}:`, err.message);
   }
-  await quickSetup.runAutoPilot(guild);
-  await utility.handleGuildCreate(guild);
-  await botMemory.initGuild(guild);
-  await dmReminder.initGuild(guild);
+  try {
+    if (guild.id === '1553818924314001450') {
+      const me = guild.members?.me || (await guild.members?.fetchMe().catch(() => null));
+      if (me && !me.nickname && me.permissions?.has(PermissionFlagsBits.ChangeNickname)) {
+        await me.setNickname('edits bot').catch(() => {});
+      }
+    }
+    await quickSetup.runAutoPilot(guild);
+    await utility.handleGuildCreate(guild);
+    await botMemory.initGuild(guild);
+    await dmReminder.initGuild(guild);
+  } catch (gErr) {
+    console.error(`[GUILD CREATE ERROR ${guild.id}]:`, gErr.message);
+  }
 });
 
 // Member Lifecycle Events (Welcomer & Invite Tracking & Auto-Roles)
 client.on(Events.GuildMemberAdd, async (member) => {
-  await utility.handleJoin(member);
-  await roles.handleMemberJoin(member);
+  try {
+    await utility.handleJoin(member);
+    await roles.handleMemberJoin(member);
+  } catch (err) {
+    console.error(`[ISOLATED ERROR in GuildMemberAdd ${member.guild?.id}]:`, err.message);
+  }
 });
 
 client.on(Events.GuildMemberRemove, async (member) => {
-  await utility.handleLeave(member);
-  await roles.handleMemberLeave(member);
+  try {
+    await utility.handleLeave(member);
+    await roles.handleMemberLeave(member);
+  } catch (err) {
+    console.error(`[ISOLATED ERROR in GuildMemberRemove ${member.guild?.id}]:`, err.message);
+  }
 });
 
 // Directives Real-Time Sync on Rule Updates/Deletions
@@ -247,10 +276,11 @@ client.on(Events.MessageDelete, async (message) => {
 
 // Essential Event Routing: Honeypot, Autonomous Sentinel, Staff Copilot, Bump Buddy, Showcase Auto-Threads, Sticky Tags, Hiring Guard & Auto Translator
 client.on(Events.MessageCreate, async (message) => {
-  if (!message.guild) {
-    await dmReminder.handleDirectMessage(message);
-    return;
-  }
+  try {
+    if (!message.guild) {
+      await dmReminder.handleDirectMessage(message);
+      return;
+    }
 
   // Handle staff native reply in DM reports channel
   const handledReportReply = await dmReminder.handleGuildMessage(message);
@@ -291,7 +321,7 @@ client.on(Events.MessageCreate, async (message) => {
       const results = await quickSetup.runAutoPilot(message.guild, true);
       const embed = new EmbedBuilder()
         .setColor(0x2ECC71)
-        .setTitle('⚡・EditX 100% Autonomous Auto-Pilot Online')
+        .setTitle(`⚡・${message.guild.name} 100% Autonomous Auto-Pilot Online`)
         .setDescription(
           `Your server is operating on **complete autonomous auto-pilot**.\n\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -305,7 +335,7 @@ client.on(Events.MessageCreate, async (message) => {
           `🧠 **8. State Vault & Custom Rules**\n▸ ${results.memory}\n\n` +
           `🌐 **9. Server Knowledge & AI Context**\n▸ ${results.serverScan}\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-          `✨ *EditX is managing member arrivals, roles, tickets, hiring threads, and security 24/7.*`
+          `✨ *Autonomous operations are managing member arrivals, roles, tickets, hiring threads, and security 24/7.*`
         )
         .setFooter({ text: `${message.guild.name} • 100% Autonomous Auto-Pilot` })
         .setTimestamp();
@@ -349,7 +379,7 @@ client.on(Events.MessageCreate, async (message) => {
     if (cmd === 'scan') {
       const waitMsg = await message.reply('🔍 **Deep-scanning channels, categories, roles & rules into bot memory...**').catch(() => null);
       await botMemory.scanServer(message.guild, message.author);
-      if (waitMsg) await waitMsg.edit({ content: `✅ **Deep Server Scan Complete!**\nEditX AI now has full knowledge of all channels, roles, and guidelines in **${message.guild.name}**.` }).catch(() => {});
+      if (waitMsg) await waitMsg.edit({ content: `✅ **Deep Server Scan Complete!**\nAI now has full knowledge of all channels, roles, and guidelines in **${message.guild.name}**.` }).catch(() => {});
       return;
     }
 
@@ -427,7 +457,7 @@ client.on(Events.MessageCreate, async (message) => {
         const directives = botMemory.getDirectivesList(message.guild.id);
         const embed = new EmbedBuilder()
           .setColor(0x5865F2)
-          .setTitle(`🧠 EditX Memory Vault Health • ${message.guild.name}`)
+          .setTitle(`🧠 ${message.guild.name} Memory Vault Health`)
           .setDescription(
             `• **Vault Channel**: ${vaultChan ? `<#${vaultChan.id}>` : '`#bot-memory`'}\n` +
             `• **Rules Channel**: ${rulesChan ? `<#${rulesChan.id}>` : '`#bot-rules`'}\n` +
@@ -458,7 +488,7 @@ client.on(Events.MessageCreate, async (message) => {
     if (cmd === 'help') {
       const helpEmbed = new EmbedBuilder()
         .setColor(0x5865F2)
-        .setTitle('⚡ EditX Supreme Bot Commands')
+        .setTitle(`⚡ ${message.guild.name} Server Commands`)
         .setDescription(
           `**👑 Bot Owner (<@${BOT_OWNER_ID}>) & Server Admin Commands:**\n\n` +
           `• \`!autopilot\` — Activate 100% Autonomous Auto-Pilot across the server\n` +
@@ -536,11 +566,18 @@ client.on(Events.MessageCreate, async (message) => {
 
   // 11. Experience & Leveling Progress
   leveling.handleChatXP(message);
+  } catch (err) {
+    console.error(`[ISOLATED ERROR in MessageCreate ${message.guild?.id || 'DM'}]:`, err.message);
+  }
 });
 
 // Message Deletion Handlers (Ghost-Ping Catcher; Audit Logger handled via LoggingModule event registration)
 client.on(Events.MessageDelete, async (message) => {
-  await housekeeper.handleMessageDelete(message);
+  try {
+    await housekeeper.handleMessageDelete(message);
+  } catch (err) {
+    console.error(`[ISOLATED ERROR in MessageDelete ${message.guild?.id}]:`, err.message);
+  }
 });
 
 // Unified Interaction Router (Commands, Buttons, Menus, Modals)

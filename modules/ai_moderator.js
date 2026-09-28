@@ -26,6 +26,7 @@ class AIModerationModule {
     // Rate Limiter: Max 10 requests per minute
     this.maxRpm = 10;
     this.requestTimestamps = [];
+    this.guildRequestTimestamps = new Map(); // guildId -> number[]
 
     // Circuit Breaker: Pauses requests if 429 encountered
     this.circuitBreakerUntil = 0;
@@ -479,6 +480,17 @@ Respond strictly in valid JSON format:
       if (this.requestTimestamps.length >= this.maxRpm) {
         this.stats.rateLimitsAvoided++;
         return { flagged: false, category: 'SKIPPED_RPM_LIMIT', confidence: 0, reason: 'AI RPM ceiling reached' };
+      }
+
+      // Check per-guild rate limit so one guild cannot starve other guilds of moderation scans
+      if (guildId) {
+        const guildTs = (this.guildRequestTimestamps.get(guildId) || []).filter(t => now - t < 60000);
+        if (guildTs.length >= 6) {
+          this.stats.rateLimitsAvoided++;
+          return { flagged: false, category: 'SKIPPED_GUILD_RPM', confidence: 0, reason: 'Per-server AI RPM ceiling reached' };
+        }
+        guildTs.push(now);
+        this.guildRequestTimestamps.set(guildId, guildTs);
       }
 
       this.requestTimestamps.push(now);

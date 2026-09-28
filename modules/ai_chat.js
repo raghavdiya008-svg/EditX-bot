@@ -20,6 +20,9 @@ class AIChatModule {
     // Rate limiter & cooldowns (1 message per 3 seconds per user to prevent spam)
     this.userCooldowns = new Map();
 
+    // Per-guild rate limiters to guarantee quota isolation across servers
+    this.guildAiTimestamps = new Map(); // guildId -> number[]
+
     // Cache of application emojis
     this.applicationEmojis = new Map();
   }
@@ -105,6 +108,18 @@ class AIChatModule {
   async handleCommand(interaction) {
     if (interaction.commandName === 'ask') {
       const prompt = interaction.options.getString('prompt');
+      const now = Date.now();
+      const guildId = interaction.guild?.id || 'global';
+      const guildTimestamps = (this.guildAiTimestamps.get(guildId) || []).filter(t => now - t < 60000);
+      if (guildTimestamps.length >= 6) {
+        return interaction.reply({
+          content: `⏳ **Server AI Cooldown**: The AI assistant in **${interaction.guild?.name || 'this server'}** is currently experiencing high chat volume. Please wait a moment before running another \`/ask\`.`,
+          ephemeral: true
+        });
+      }
+      guildTimestamps.push(now);
+      this.guildAiTimestamps.set(guildId, guildTimestamps);
+
       await interaction.deferReply();
 
       const isBotOwner = interaction.user.id === '1320083615475830797';
@@ -155,7 +170,7 @@ class AIChatModule {
         const cfg = this.db.get(key) || {};
         cfg.chatChannelId = null;
         this.db.set(key, cfg);
-        return interaction.reply({ content: `✅ Dedicated AI chat channel disabled. You can still use \`@EditX\` or \`/ask\` anywhere!`, ephemeral: true });
+        return interaction.reply({ content: `✅ Dedicated AI chat channel disabled. You can still mention me or use \`/ask\` anywhere!`, ephemeral: true });
       }
 
       if (sub === 'mute') {
@@ -206,7 +221,9 @@ class AIChatModule {
 
     const isMentioned = Boolean(this.client.user && message.mentions?.users?.has(this.client.user.id));
     const isReplyingToBot = Boolean(message.reference && (await this.isReplyToBot(message)));
-    const startsWithBotName = /^(\b(hey\s+|yo\s+)?editx\b|\bbot\b[,:]?\s+)/i.test(message.content);
+    const meName = (message.guild?.members?.me?.displayName || this.client.user?.username || 'bot').toLowerCase().replace(/[^\w]/g, '');
+    const botRegex = new RegExp(`^(\\b(hey\\s+|yo\\s+)?(${meName}|editx|bot)\\b[,:]?\\s+)`, 'i');
+    const startsWithBotName = botRegex.test(message.content);
 
     const isDirectlyAddressed = isMentioned || isReplyingToBot || startsWithBotName;
 
@@ -249,7 +266,7 @@ class AIChatModule {
 
     // Clean prompt by removing bot mention or prefix
     let prompt = message.content.replace(new RegExp(`<@!?${this.client.user.id}>`, 'g'), '')
-      .replace(/^(\b(hey\s+|yo\s+)?editx\b|\bbot\b[,:]?\s+)/i, '')
+      .replace(botRegex, '')
       .trim();
     // Strip all user, role, and channel mention syntax to check actual textual intent
     const textWithoutMentions = prompt.replace(/<@!?[0-9]+>|<@&[0-9]+>|<#[0-9]+>/g, '').trim();
@@ -509,7 +526,7 @@ class AIChatModule {
     if (isMentioned && textWithoutMentions.length === 0) {
       const sparkle = this.getEmoji('sparkles', '✨');
       return message.reply({
-        content: `👋 Hello <@${message.author.id}>! How can I help you today? Ask me any video editing, design, or server question using \`@EditX <your question>\` or \`/ask\`.`,
+        content: `👋 Hello <@${message.author.id}>! How can I help you today? Ask me any questions using \`@${this.client.user?.username || 'bot'} <your question>\` or \`/ask\`.`,
         allowedMentions: { repliedUser: false }
       }).catch(() => {});
     }
@@ -534,6 +551,17 @@ class AIChatModule {
       return message.reply({ content: '⏱️ Please give me a second before asking another question!' }).catch(() => {});
     }
     this.userCooldowns.set(message.author.id, now);
+
+    // Per-guild rate limit protection: max 6 requests per 60s per guild (guarantees cross-server quota isolation)
+    const guildTimestamps = (this.guildAiTimestamps.get(message.guild.id) || []).filter(t => now - t < 60000);
+    if (guildTimestamps.length >= 6) {
+      return message.reply({
+        content: `⏳ **Server AI Cooldown**: The AI assistant in **${message.guild.name}** is currently experiencing high chat volume. Please wait a moment before sending another prompt.`,
+        allowedMentions: { repliedUser: false }
+      }).catch(() => {});
+    }
+    guildTimestamps.push(now);
+    this.guildAiTimestamps.set(message.guild.id, guildTimestamps);
 
     // Send typing indicator
     await message.channel.sendTyping().catch(() => {});
@@ -699,7 +727,7 @@ class AIChatModule {
       ? `\n\nSERVER KNOWLEDGE & ARCHITECTURE (SCANNED):\n${serverContext.slice(0, 1500)}\n`
       : '';
 
-    let systemPrompt = `You are EditX AI, the official Discord assistant for "${context.guildName || 'EditX Server'}".
+    let systemPrompt = `You are the official Discord AI assistant for "${context.guildName || 'Server'}".
 User: ${context.userName || 'Member'}${serverContextSection}
 ${directivesBlock}
 CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
@@ -709,7 +737,7 @@ CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
    - NEVER dump capability menus, bullet points, or feature lists unless EXPLICITLY asked.
    - Under NO circumstances send walls of text or unsolicited essays. Keep normal chat under 2-3 sentences.
 2. GREETINGS & SERVER EXPLANATIONS (WHEN ASKED):
-   - If asked to greet, welcome, introduce, or explain the server to someone (e.g. "greet @User", "welcome @User", "explain about server to @User"): Speak directly and warmly to them in 1-3 natural, friendly sentences! (e.g. "Yo @User! Welcome to EditX, the creative editing hub! Glad to have you here 🎉").
+   - If asked to greet, welcome, introduce, or explain the server to someone (e.g. "greet @User", "welcome @User", "explain about server to @User"): Speak directly and warmly to them in 1-3 natural, friendly sentences! (e.g. "Yo @User! Welcome to ${context.guildName || 'the server'}! Glad to have you here 🎉").
 3. TECHNICAL QUESTIONS:
    - For video editing, design, VFX, or freelancing: Give direct, accurate answers in 2-4 sentences.
 4. CONTEXT:
@@ -792,7 +820,7 @@ ${customDirectives ? `\n5. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):
       }
     }
 
-    return `🎬 **EditX AI**: I encountered a temporary connection glitch while processing your request. Please try asking again in a moment!`;
+    return `🤖 **${context.guildName || 'Server'} AI**: I encountered a temporary connection glitch while processing your request. Please try asking again in a moment!`;
   }
 
   splitMessage(text, maxLength = 1950) {

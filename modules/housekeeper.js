@@ -291,7 +291,7 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
         `### ⚡ Quick Actions\n` +
         `Use \`/copilot briefing\`, \`/copilot summarize\`, or \`/setup audit\` anytime.`
       )
-      .setFooter({ text: 'EditX Autonomous Guardian • 12-Hour Executive Report' })
+      .setFooter({ text: `${guild.name} Guardian • 12-Hour Executive Report` })
       .setTimestamp();
 
     return embed;
@@ -415,7 +415,7 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
             `### 📌 Key Highlights\n` +
             `${summary}`
           )
-          .setFooter({ text: 'EditX Staff Copilot' })
+          .setFooter({ text: `${guild.name} Staff Copilot` })
           .setTimestamp();
 
         await interaction.editReply({ embeds: [embed] });
@@ -447,7 +447,7 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
           { name: 'Account Created', value: `<t:${createdTs}:F> (<t:${createdTs}:R>)`, inline: false },
           { name: 'Joined Server', value: joinedTs ? `<t:${joinedTs}:F> (<t:${joinedTs}:R>)` : 'Not in server', inline: false }
         )
-        .setFooter({ text: 'EditX Staff Copilot' })
+        .setFooter({ text: `${guild.name} Staff Copilot` })
         .setTimestamp();
 
       await interaction.editReply({ embeds: [embed] });
