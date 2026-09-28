@@ -12,7 +12,7 @@
     "enabled": true,
     "channelId": "1540409717967421500",
     "cardEnabled": true,
-    "dmEnabled": true,
+    "dmEnabled": false,
     "theme": "dark"
   },
   "bump_cfg_1538957031455596544": {

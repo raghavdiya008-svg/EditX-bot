@@ -4,7 +4,7 @@ const path = require('path');
 const instances = new Set();
 
 class JSONDatabase {
-  constructor(name) {
+  constructor(name = 'default') {
     this.name = name;
     this.dataDir = path.join(__dirname, 'data');
     this.path = path.join(this.dataDir, `${name}.json`);

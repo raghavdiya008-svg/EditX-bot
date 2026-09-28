@@ -118,6 +118,24 @@ class HousekeeperModule {
   async handleStaffPing(message) {
     if (!message.guild || message.author.bot) return false;
 
+    // 0. ABSOLUTE SILENCE GUARD: Never respond to @everyone or @here pings under any circumstances
+    if (message.mentions?.everyone || /@(everyone|here)\b/i.test(message.content)) {
+      return false;
+    }
+
+    // 0b. Respect channel mutes and moderator-only directives: Never reply in #moderator-only or muted channels
+    const guildId = message.guild.id;
+    const mutedChannels = this.db?.get ? (this.db.get(`aichat_muted_${guildId}`) || []) : [];
+    const isServerMuted = this.db?.get ? Boolean(this.db.get(`aichat_muted_server_${guildId}`)) : false;
+    const isChanMuted = mutedChannels.includes(message.channel.id) ||
+      (message.channel.name && (
+        message.channel.name.includes('moderator-only') ||
+        message.channel.name.includes('mod-only')
+      )) ||
+      message.channel.id === '1538967412672565319';
+
+    if (isServerMuted || isChanMuted) return false;
+
     // Check if message pings staff roles or contains staff mention
     const staffRoles = message.guild.roles.cache.filter(r =>
       r.permissions.has(PermissionFlagsBits.ManageMessages) ||

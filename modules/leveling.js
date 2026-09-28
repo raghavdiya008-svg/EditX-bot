@@ -165,6 +165,14 @@ class LevelingModule {
     const config = this.db.get(`config_${member.guild.id}`) || { mode: 'current', channelId: null, message: null };
     if (config.mode === 'disabled') return;
 
+    // Suppress announcements in moderator-only and confidential staff channels
+    if (currentChannel && (
+      (currentChannel.name && (currentChannel.name.includes('moderator-only') || currentChannel.name.includes('mod-only'))) ||
+      currentChannel.id === '1538967412672565319'
+    )) {
+      return;
+    }
+
     const defaultMsg = `🎉 Congrats <@${member.id}>, you advanced to **Level ${newLevel}**!`;
     const text = config.message
       ? config.message.replace('{user}', `<@${member.id}>`).replace('{level}', newLevel)

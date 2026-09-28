@@ -325,6 +325,17 @@ ${cleanText}
     const ignoredChannels = this.db.get(`translate_ignore_channels_${guildId}`, []);
     if (ignoredChannels.includes(message.channel.id)) return false;
 
+    // Respect server/channel mute settings and moderator-only directives
+    const mutedChannels = this.db.get(`aichat_muted_${guildId}`) || [];
+    const isServerMuted = Boolean(this.db.get(`aichat_muted_server_${guildId}`));
+    const isChanMuted = mutedChannels.includes(message.channel.id) ||
+      (message.channel.name && (
+        message.channel.name.includes('moderator-only') ||
+        message.channel.name.includes('mod-only')
+      )) ||
+      message.channel.id === '1538967412672565319';
+    if (isServerMuted || isChanMuted) return false;
+
     // Fast check: is this likely non-English?
     if (!this.isLikelyNonEnglish(message.content)) {
       return false;

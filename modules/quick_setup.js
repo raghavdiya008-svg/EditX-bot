@@ -620,18 +620,25 @@ class QuickSetupModule {
     // 2. Auto-Role on Member Join
     try {
       const currentCfg = cfgDb.get ? (cfgDb.get(guild.id) || {}) : {};
-      const roleList = guild.roles?.cache ? Array.from(guild.roles.cache.values()) : [];
-      const memberRole = roleList.find(r =>
-        ['member', 'members', 'community', 'verified', 'editor'].some(n => (r.name || '').toLowerCase() === n)
-      );
-      if (memberRole) {
-        currentCfg.autoRoleId = memberRole.id;
-        if (cfgDb.set) cfgDb.set(guild.id, currentCfg);
-        results.autorole = `🟢 Linked to <@&${memberRole.id}> (Auto-assigned on join)`;
-      } else if (currentCfg.autoRoleId) {
-        results.autorole = `🟢 Linked to <@&${currentCfg.autoRoleId}>`;
+      const hasVerificationGate = (guild.features && guild.features.includes('MEMBER_VERIFICATION_GATE_ENABLED')) ||
+        (guild.channels?.cache && Array.from(guild.channels.cache.values()).some(c => c && c.name && (c.name.includes('verify') || c.name.includes('verification'))));
+
+      if (currentCfg.autoRoleDisabled === true || (hasVerificationGate && !currentCfg.bypassVerification)) {
+        results.autorole = `⚪ Disabled (Protected by Verification Gate / Wick Bot)`;
       } else {
-        results.autorole = `⚪ No standard @Member role found`;
+        const roleList = guild.roles?.cache ? Array.from(guild.roles.cache.values()) : [];
+        const memberRole = roleList.find(r =>
+          ['member', 'members', 'community', 'verified', 'editor'].some(n => (r.name || '').toLowerCase() === n)
+        );
+        if (memberRole) {
+          currentCfg.autoRoleId = memberRole.id;
+          if (cfgDb.set) cfgDb.set(guild.id, currentCfg);
+          results.autorole = `🟢 Linked to <@&${memberRole.id}> (Auto-assigned on join)`;
+        } else if (currentCfg.autoRoleId) {
+          results.autorole = `🟢 Linked to <@&${currentCfg.autoRoleId}>`;
+        } else {
+          results.autorole = `⚪ No standard @Member role found`;
+        }
       }
     } catch (e) {
       results.autorole = `⚠️ Auto-role check: ${e.message}`;

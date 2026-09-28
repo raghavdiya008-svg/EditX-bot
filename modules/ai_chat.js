@@ -236,7 +236,12 @@ class AIChatModule {
       }
 
       // Check for mute settings
-      const isChannelMuted = (this.db.get(`aichat_muted_${guildId}`) || []).includes(message.channel.id);
+      const isChannelMuted = (this.db.get(`aichat_muted_${guildId}`) || []).includes(message.channel.id) ||
+        (message.channel.name && (
+          message.channel.name.includes('moderator-only') ||
+          message.channel.name.includes('mod-only')
+        )) ||
+        message.channel.id === '1538967412672565319';
       const isServerMuted = Boolean(this.db.get(`aichat_muted_server_${guildId}`));
 
       // If it's NOT a dedicated channel, it's just a normal message. Maybe check FAQ, then ignore.
@@ -260,7 +265,12 @@ class AIChatModule {
     }
 
     // Check for mute settings for directly addressed messages
-    const isChannelMuted = (this.db.get(`aichat_muted_${guildId}`) || []).includes(message.channel.id);
+    const isChannelMuted = (this.db.get(`aichat_muted_${guildId}`) || []).includes(message.channel.id) ||
+      (message.channel.name && (
+        message.channel.name.includes('moderator-only') ||
+        message.channel.name.includes('mod-only')
+      )) ||
+      message.channel.id === '1538967412672565319';
     const isServerMuted = Boolean(this.db.get(`aichat_muted_server_${guildId}`));
 
 
@@ -279,6 +289,11 @@ class AIChatModule {
                         Boolean(message.member?.permissions?.has(PermissionFlagsBits.ManageMessages)) ||
                         Boolean(message.member?.permissions?.has(PermissionFlagsBits.ManageChannels)) ||
                         Boolean(message.member?.permissions?.has(PermissionFlagsBits.Administrator));
+
+    // Absolute Silence Guard: In muted channels, non-staff users never receive any replies
+    if (!canManageAI && (isServerMuted || isChannelMuted)) {
+      return false;
+    }
 
     // A. Check for UNMUTE / TOGGLE ON command (e.g. "@EditX you can reply in this channel/server", "@EditX start replying here", "@EditX resume here", "@EditX unmute here")
     const isUnmuteRequest = /\b(you\s+can\s+reply|start\s+replying|resume|unmute|talk\s+again|reply\s+again|start\s+talking|send\s+messages?\s+again)\b/i.test(lower);

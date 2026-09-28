@@ -1317,6 +1317,12 @@ class ModerationModule {
     const isCreativeContent = CREATIVE_DOMAINS.some(d => content.toLowerCase().includes(d)) || 
       (message.attachments && message.attachments.size > 0);
 
+    // 0. Nitro Guard Directive: If anyone types the word 'nitro', just delete that message and don't do anything other than that
+    if (/\bnitro\b/i.test(content)) {
+      await message.delete().catch(() => {});
+      return false;
+    }
+
     // 1. Invite Link Blocker (Strictly targets discord invites, bypasses creative URLs)
     if (config.antiInvite && this.INVITE_REGEX.test(content)) {
       await this.punish(message, 'Unauthorized Discord Invite', 'DELETE');
@@ -1373,10 +1379,18 @@ class ModerationModule {
   async checkPromoRestriction(message) {
     if (!message.guild || message.author?.bot || !message.member) return false;
 
-    // 1. Channel check: If in #self-promotions, allowed!
+    // 1. Channel check: If in #self-promotions, or designated marketplace/showcase channels, allowed!
     const promoChan = message.guild.channels?.cache?.find?.(c => c.name && c.name.includes('self-promotions'));
     const promoChanId = promoChan?.id || '1540409739236745378';
-    if (message.channel.id === promoChanId || (message.channel.name && message.channel.name.includes('self-promotions'))) {
+    const isPromoChannel = (message.channel.id === promoChanId) || 
+      (message.channel.name && (
+        message.channel.name.includes('self-promotions') ||
+        message.channel.name.includes('for-hire') ||
+        message.channel.name.includes('hiring') ||
+        message.channel.name.includes('portfolio') ||
+        message.channel.name.includes('showcase')
+      ));
+    if (isPromoChannel) {
       return false;
     }
 
