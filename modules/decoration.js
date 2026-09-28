@@ -543,7 +543,7 @@ class DecorationModule {
 
     if (type === 'rules') {
       return new EmbedBuilder()
-        .setColor(0x0F172A)
+        .setColor(0x00E5FF)
         .setTitle(`📜・COMMUNITY GUIDELINES // ${guild.name}`)
         .setDescription(
           `Welcome to **${guild.name}**! To maintain a productive, creative, and safe environment for all members, please review our official rules.\n` +
@@ -560,13 +560,13 @@ class DecorationModule {
           `Follow instructions from moderators. If you suspect an account of being compromised or raiding, notify staff immediately.\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
         )
-        .setFooter({ text: `${guild.name} • Official Network Standards`, iconURL: iconUrl })
+        .setFooter({ text: `${guild.name} • Level 2 Boosted Network • Official Directives`, iconURL: iconUrl })
         .setTimestamp();
     }
 
     if (type === 'welcome') {
       return new EmbedBuilder()
-        .setColor(0x06B6D4)
+        .setColor(0xD946EF)
         .setTitle(`👋・WELCOME TO ${guild.name.toUpperCase()} // QUICKSTART`)
         .setDescription(
           `We are a premier network for video editors, VFX artists, sound designers, and content creators!\n` +
@@ -579,7 +579,7 @@ class DecorationModule {
           `*Have questions or need assistance? Open a support ticket anytime!*`
         )
         .setThumbnail(iconUrl)
-        .setFooter({ text: 'EDITX Creative Network • Welcome Hub' })
+        .setFooter({ text: 'EDITX Creative Network • Level 2 Boosted Network' })
         .setTimestamp();
     }
 
