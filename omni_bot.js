@@ -275,6 +275,9 @@ client.on(Events.MessageDelete, async (message) => {
 client.on(Events.MessageCreate, async (message) => {
   try {
     if (!message.guild) {
+      if (dashboard && typeof dashboard.broadcastDirectMessage === 'function') {
+        dashboard.broadcastDirectMessage(message);
+      }
       await dmReminder.handleDirectMessage(message);
       return;
     }
