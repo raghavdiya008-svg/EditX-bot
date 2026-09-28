@@ -3028,6 +3028,88 @@ async function runTests() {
     assert.strictEqual(botReplied, false, 'Must not send any reply to @everyone');
   });
 
+  await test('42. EditX Cockpit & Live Server Takeover Dashboard Module', async () => {
+    const DashboardModule = require('./modules/dashboard');
+    const mockClient = {
+      isReady: () => true,
+      user: { id: 'bot_123', tag: 'EditX#0799', displayAvatarURL: () => 'http://avatar.png' },
+      guilds: {
+        cache: new Map([
+          ['1538957031455596544', {
+            id: '1538957031455596544',
+            name: 'EDITX | The Creative Network',
+            memberCount: 238,
+            premiumTier: 2,
+            premiumSubscriptionCount: 7,
+            iconURL: () => 'http://icon.png',
+            roles: { cache: new Map() },
+            channels: { cache: new Map() }
+          }]
+        ])
+      },
+      channels: { cache: new Map() }
+    };
+    const mockDb = { config: new Map(), utility: new Map() };
+    const dash = new DashboardModule(mockClient, mockDb);
+
+    // Initial state: Bot in charge
+    assert.strictEqual(dash.isTakeoverActive(), false, 'Takeover must initially be false');
+    assert.strictEqual(dash.operatorConnected, false, 'Operator must initially be disconnected');
+
+    // 1. Enable Takeover
+    const eng = dash.enableTakeover('1554151421056647290');
+    assert.strictEqual(eng.active, true, 'Takeover must be active');
+    assert.strictEqual(dash.isTakeoverActive('1554151421056647290'), true, 'Takeover in active channel must be true');
+    assert.strictEqual(dash.isTakeoverActive('other_chan'), false, 'Takeover in other channel must be false');
+
+    // 2. Global Takeover
+    dash.enableTakeover('all');
+    assert.strictEqual(dash.isTakeoverActive('any_chan'), true, 'Global takeover must cover all channels');
+
+    // 3. Heartbeat
+    const hb = dash.recordHeartbeat();
+    assert.strictEqual(hb.success, true, 'Heartbeat must succeed');
+    assert.ok(dash.lastHeartbeat > 0, 'lastHeartbeat must be set');
+
+    // 4. Release Takeover & Auto-return to bot
+    const rel = dash.releaseTakeover('Screen closed');
+    assert.strictEqual(rel.active, false, 'Takeover must be inactive after release');
+    assert.strictEqual(dash.isTakeoverActive('any_chan'), false, 'Bot must take charge again');
+
+    // 5. Test HTTP endpoints
+    const mockRes = () => {
+      let statusCode = 200;
+      let headers = {};
+      let body = '';
+      return {
+        writeHead: (code, h) => { statusCode = code; if (h) headers = h; },
+        setHeader: (k, v) => { headers[k] = v; },
+        write: (d) => { body += d; },
+        end: (d) => { if (d) body += d; },
+        getStatusCode: () => statusCode,
+        getBody: () => body
+      };
+    };
+
+    // Health check endpoint
+    const resHealth = mockRes();
+    await dash.handleHttpRequest({ url: '/health', method: 'GET', headers: {} }, resHealth);
+    assert.strictEqual(resHealth.getStatusCode(), 200, '/health must return 200');
+    assert.ok(resHealth.getBody().includes('EditX Discord Bot'), '/health body must identify bot');
+
+    // Dashboard HTML endpoint
+    const resHtml = mockRes();
+    await dash.handleHttpRequest({ url: '/', method: 'GET', headers: {} }, resHtml);
+    assert.strictEqual(resHtml.getStatusCode(), 200, '/ must return 200');
+    assert.ok(resHtml.getBody().includes('EDITX Server Cockpit'), 'HTML must include dashboard title');
+
+    // API Status endpoint
+    const resStatus = mockRes();
+    await dash.handleHttpRequest({ url: '/api/status', method: 'GET', headers: {} }, resStatus);
+    assert.strictEqual(resStatus.getStatusCode(), 200, '/api/status must return 200');
+    assert.ok(resStatus.getBody().includes('EDITX | The Creative Network'), 'Status must include guild info');
+  });
+
   console.log('\n====================================================');
   console.log(`🏁 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('====================================================\n');

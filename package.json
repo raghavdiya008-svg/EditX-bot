@@ -5,6 +5,7 @@
   "main": "omni_bot.js",
   "scripts": {
     "start": "node omni_bot.js",
+    "dashboard": "node scripts/dashboard.js",
     "deploy": "node deploy_commands.js",
     "test": "node test_suite.js"
   },

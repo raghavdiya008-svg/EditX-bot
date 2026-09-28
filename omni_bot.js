@@ -14,25 +14,10 @@ const {
   PermissionFlagsBits
 } = require('discord.js');
 const http = require('http');
-require('dotenv').config();
-
-// Built-in HTTP Health Check Server (Enables 24/7 Free Hosting on Render, Koyeb, Glitch, etc.)
-const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
-    status: 'online',
-    bot: 'EditX Discord Bot',
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString()
-  }));
-}).listen(PORT, () => {
-  console.log(`[HTTP HEALTH CHECK] Online on port ${PORT} (24/7 ping ready)`);
-});
-
 const JSONDatabase = require('./database');
 
 // Load Essential Focused Modules
+const DashboardModule = require('./modules/dashboard');
 const QuickSetupModule = require('./modules/quick_setup');
 const UtilityModule = require('./modules/utility');
 const TicketsModule = require('./modules/tickets');
@@ -127,9 +112,20 @@ const socialAlerts = new SocialAlertsModule(client, db);
 const aiChat = new AIChatModule(client, db, botMemory);
 aiChat.setHousekeeper(housekeeper);
 const dmReminder = new DMReminderModule(client, db);
+const dashboard = new DashboardModule(client, db, botMemory);
+client.dashboard = dashboard;
+
+// Built-in HTTP Health Check & Cockpit Dashboard Server
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  dashboard.handleHttpRequest(req, res);
+}).listen(PORT, () => {
+  console.log(`[COCKPIT & HEALTH CHECK] Live Server Dashboard online on port ${PORT} (http://localhost:${PORT})`);
+});
 
 // All active modules list
 const modules = [
+  dashboard,
   botMemory,
   quickSetup,
   utility,
@@ -282,6 +278,11 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
+    // Broadcast message to live dashboard SSE stream
+    if (dashboard && typeof dashboard.broadcastMessage === 'function') {
+      dashboard.broadcastMessage(message);
+    }
+
   // Handle staff native reply in DM reports channel
   const handledReportReply = await dmReminder.handleGuildMessage(message);
   if (handledReportReply) return;
@@ -304,7 +305,7 @@ client.on(Events.MessageCreate, async (message) => {
     text = text.slice(1).trim();
   } else if (client.user && (text.startsWith(`<@${client.user.id}>`) || text.startsWith(`<@!${client.user.id}>`))) {
     const afterMention = text.replace(new RegExp(`^<@!?${client.user.id}>\\s*`), '').trim();
-    if (/^(autopilot|setup|scan|rules|memory|decorate|roles|help)/i.test(afterMention)) {
+    if (/^(autopilot|setup|scan|rules|memory|decorate|roles|help|dashboard|cockpit)/i.test(afterMention)) {
       isPrefixCmd = true;
       text = afterMention;
     }
@@ -508,6 +509,10 @@ client.on(Events.MessageCreate, async (message) => {
         .setTimestamp();
       return message.reply({ embeds: [helpEmbed] }).catch(() => {});
     }
+
+    if (cmd === 'dashboard' || cmd === 'cockpit') {
+      return message.reply(`🎮 **EditX Server Cockpit & Management Screen:**\nRun \`npm run dashboard\` in your terminal to open your screen popup, or visit: http://localhost:${PORT}`).catch(() => {});
+    }
   }
 
   // Real-time custom directives ingestion in #bot-rules
@@ -551,6 +556,13 @@ client.on(Events.MessageCreate, async (message) => {
   utility.checkBump(message);
   const handledUtil = await utility.checkMessage(message);
   if (handledUtil) return;
+
+  // --- Manual Takeover Check ---
+  // When the operator is managing the server via the Cockpit Screen,
+  // suppress automated AI replies & auto-responders so human control is 100% authentic.
+  if (dashboard && dashboard.isTakeoverActive(message.channel.id)) {
+    return;
+  }
 
   // 7. Tags, AFK, Auto-Responders & Persistent Sticky Message Reposting
   await tags.checkMessage(message);
