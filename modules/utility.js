@@ -1697,17 +1697,36 @@ class UtilityModule {
       const inviteLogChan = this.getInviteTrackerChannel(member.guild);
 
       if (inviteLogChan) {
-        let inviteReport = '';
-        if (inviterId) {
-          const inviterDisplayName = inviterUser ? (inviterUser.globalName || inviterUser.username) : `<@${inviterId}>`;
-          const fakeTag = isFake ? ' ⚠️ *(Fake: Account <24h old)*' : '';
-          inviteReport = `📥 <@${member.id}> joined! Invited by **${inviterDisplayName}** (now **${cleanTotalInvites}** invites) [Code: \`${usedCode || 'custom'}\`]${fakeTag}`;
-        } else if (isVanity) {
-          inviteReport = `🔗 <@${member.id}> joined using the server vanity invite link (**discord.gg/${usedCode || member.guild.vanityURLCode}**)!`;
+        let alreadyLogged = false;
+        try {
+          if (inviteLogChan.messages && typeof inviteLogChan.messages.fetch === 'function') {
+            const recentLogs = await inviteLogChan.messages.fetch({ limit: 8 }).catch(() => null);
+            if (recentLogs && recentLogs.size > 0) {
+              alreadyLogged = recentLogs.some(m => {
+                const isSelf = m.author?.id === this.client?.user?.id;
+                const hasUser = m.content && (m.content.includes(`<@${member.id}>`) || m.content.includes(member.id));
+                const isRecent = (Date.now() - (m.createdTimestamp || 0)) < 45000;
+                return isSelf && hasUser && isRecent;
+              });
+            }
+          }
+        } catch (e) {}
+
+        if (!alreadyLogged) {
+          let inviteReport = '';
+          if (inviterId) {
+            const inviterDisplayName = inviterUser ? (inviterUser.globalName || inviterUser.username) : `<@${inviterId}>`;
+            const fakeTag = isFake ? ' ⚠️ *(Fake: Account <24h old)*' : '';
+            inviteReport = `📥 <@${member.id}> joined! Invited by **${inviterDisplayName}** (now **${cleanTotalInvites}** invites) [Code: \`${usedCode || 'custom'}\`]${fakeTag}`;
+          } else if (isVanity) {
+            inviteReport = `🔗 <@${member.id}> joined using the server vanity invite link (**discord.gg/${usedCode || member.guild.vanityURLCode}**)!`;
+          } else {
+            inviteReport = `❓ <@${member.id}> joined using a direct, vanity, or unknown invite link.`;
+          }
+          await inviteLogChan.send(inviteReport).catch(() => {});
         } else {
-          inviteReport = `❓ <@${member.id}> joined using a direct, vanity, or unknown invite link.`;
+          console.log(`[INVITES DEDUP] Join log for <@${member.id}> already posted in #${inviteLogChan.name}, skipping duplicate send!`);
         }
-        await inviteLogChan.send(inviteReport).catch(() => {});
       }
     } catch (invErr) {
       console.error('[INVITES TRACKER LOG ERROR]', invErr);
@@ -1839,11 +1858,29 @@ class UtilityModule {
       const inviteLogChan = this.getInviteTrackerChannel(member.guild);
 
       if (inviteLogChan) {
-        if (inviterId) {
-          const inviterDisplayName = inviterUser ? (inviterUser.globalName || inviterUser.username) : `<@${inviterId}>`;
-          await inviteLogChan.send(`🚪 **${member.user?.username || member.user?.tag || member.displayName || 'Member'}** left the server. Invited by **${inviterDisplayName}** (now **${cleanTotalInvites}** invites).`).catch(() => {});
-        } else {
-          await inviteLogChan.send(`🚪 **${member.user?.username || member.user?.tag || member.displayName || 'Member'}** left the server. (Invite source untracked or vanity link).`).catch(() => {});
+        let alreadyLoggedLeave = false;
+        try {
+          if (inviteLogChan.messages && typeof inviteLogChan.messages.fetch === 'function') {
+            const recentLogs = await inviteLogChan.messages.fetch({ limit: 8 }).catch(() => null);
+            if (recentLogs && recentLogs.size > 0) {
+              const uName = member.user?.username || member.user?.tag || member.displayName;
+              alreadyLoggedLeave = recentLogs.some(m => {
+                const isSelf = m.author?.id === this.client?.user?.id;
+                const hasUser = m.content && (m.content.includes(member.id) || (uName && m.content.includes(uName)));
+                const isRecent = (Date.now() - (m.createdTimestamp || 0)) < 45000;
+                return isSelf && hasUser && isRecent;
+              });
+            }
+          }
+        } catch (e) {}
+
+        if (!alreadyLoggedLeave) {
+          if (inviterId) {
+            const inviterDisplayName = inviterUser ? (inviterUser.globalName || inviterUser.username) : `<@${inviterId}>`;
+            await inviteLogChan.send(`🚪 **${member.user?.username || member.user?.tag || member.displayName || 'Member'}** left the server. Invited by **${inviterDisplayName}** (now **${cleanTotalInvites}** invites).`).catch(() => {});
+          } else {
+            await inviteLogChan.send(`🚪 **${member.user?.username || member.user?.tag || member.displayName || 'Member'}** left the server. (Invite source untracked or vanity link).`).catch(() => {});
+          }
         }
       }
     } catch (e) {}
