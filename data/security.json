@@ -5,9 +5,8 @@
     "alertChannel": "1549453906109538415"
   },
   "mod_report_chan_1538957031455596544": "1549453906109538415",
-  "1538957031455596544": {
-    "honeypotChannelId": "1546818053059379251",
-    "honeypotAction": "STRIP_ROLES",
-    "reportOnly": true
+  "1538957031455596544": {},
+  "1553818924314001450": {
+    "honeypotChannelId": "1553828614628450395"
   }
 }

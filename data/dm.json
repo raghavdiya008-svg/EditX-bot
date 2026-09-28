@@ -223,6 +223,30 @@
       "registeredAt": 1790498919188,
       "firstMessageDate": "9/27/2026, 2:18:39 PM",
       "active": true
+    },
+    "1127429517116444714": {
+      "userId": "1127429517116444714",
+      "username": "szortk",
+      "tag": "szortk",
+      "registeredAt": 1790534994694,
+      "active": true
+    },
+    "1547152905465897049": {
+      "userId": "1547152905465897049",
+      "username": "this.is.ahana",
+      "tag": "this.is.ahana",
+      "registeredAt": 1790576237690,
+      "active": true
     }
-  }
+  },
+  "subscribers_1553818924314001450": {
+    "1547152905465897049": {
+      "userId": "1547152905465897049",
+      "username": "this.is.ahana",
+      "tag": "this.is.ahana",
+      "registeredAt": 1790576237859,
+      "active": true
+    }
+  },
+  "user_active_guild_1550907501506072576": "1538957031455596544"
 }

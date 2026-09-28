@@ -1,10 +1,10 @@
 {
   "stats_1538957031455596544": {
-    "categoryId": "1554150160257515531",
+    "categoryId": "1548694422923907092",
     "channelId": "1548694425151078511"
   },
   "stats_channels_1538957031455596544": {
-    "categoryId": "1554150160257515531",
+    "categoryId": "1548735257203974285",
     "memberChannelId": "1548735259770757180",
     "boostChannelId": "1548735261909979256"
   },
@@ -12,13 +12,13 @@
     "enabled": true,
     "channelId": "1540409717967421500",
     "cardEnabled": true,
-    "dmEnabled": false,
+    "dmEnabled": true,
     "theme": "dark"
   },
   "bump_cfg_1538957031455596544": {
     "channelId": "1540707425110204586",
     "roleId": "1550881183254974589",
-    "updatedAt": 1789830211023
+    "updatedAt": 1790536677678
   },
   "directives_1538957031455596544": [
     "📌 **Directive [from r13598og]:** Do not send messages or reply in #🛡️・moderator-only.",
@@ -29,7 +29,8 @@
     "do not respond for @here and @everyone",
     "📌 **Directive [from r13598og]:** do not respond for @here and @everyone",
     "📌 **[DIRECTIVE // #general-chat]**: Strict prohibition on self-promotion, advertising, freelance service solicitation, and promo copy in #general-chat. Direct members to #for-hire and designated channels.",
-    "📌 **Directive [from EditX#0799]:** Other than #self-promotions, if anyone whose highest role is a member role posts promo of anything, reply 'no promo in this channel use the #self-promotions channel only' and delete that message."
+    "📌 **Directive [from EditX#0799]:** Other than #self-promotions, if anyone whose highest role is a member role posts promo of anything, reply 'no promo in this channel use the #self-promotions channel only' and delete that message.",
+    "📌 **Directive [from Admin]:** [#✨・hiring Channel Directive] guys pls use /post to post your hiring ads"
   ],
   "forhire_chan_1538957031455596544": "1540409737177468958",
   "aichat_muted_1538957031455596544": [
@@ -38,5 +39,26 @@
   ],
   "aichat_muted_server_1538957031455596544": null,
   "server_context_1538957031455596544": "# SERVER KNOWLEDGE BASE & AUDIT: EDITX | THE CREATIVE NETWORK\n• Server ID: 1538957031455596544\n• Member Count: 156\n• Owner ID: 1320083615475830797\n• Scanned At: 2026-09-16T18:08:33.413Z\n• Initiated By: r13598og\n\n## 1. SERVER ARCHITECTURE & CHANNELS\n### Category: ╭━━〔 ✦ INFORMATION 〕━━╮\n  - #📜・rules-guidelines\n  - #📢・announcements\n  - #👋・welcome-hub\n  - #✨・get-roles\n\n### Category: ╭━━〔 💬 COMMUNITY HUB 〕━━╮\n  - #💬・general-chat\n  - #🎞️・edit-feedback\n  - #🎞️・editing-help\n  - #🤖・bot-commands\n  - #🎞️・editing-review\n\n### Category: ╭━━〔 ✦ MARKETPLACE 〕━━╮\n  - #✨・for-hire\n  - #✨・self-promotions\n  - #✨・hiring\n  - #✨・remarks\n\n### Category: ╭━━〔 ✦ SUPPORT 〕━━╮\n  - #🎟️・support-ticket\n\n### Category: ╭━━〔 🛡️ STAFF QUARTERS 〕━━╮\n  - #🛡️・moderator-only\n  - #🚀・pls-bump\n  - #🔗・invites-tracker\n  - #📋・wick-logs\n  - #🛡️・modlogs\n  - #🤖・bot-memory (EditX Bot Persistent State Vault • Automatic Cloud Backup • Do Not Delete)\n  - #📜・bot-rules (EditX Bot Live Custom Directives • Post rules here for the bot to follow)\n  - #✨・alerts\n\n### Category: ╭━━〔 ✦ SERVER STATS 〕━━╮\n  (No text channels)\n\n### Category: ╭━━〔 🔊 VOICE LOUNGE 〕━━╮\n  (No text channels)\n\n### Uncategorized Channels:\n  - #✅・verify-here\n  - #✨・do-not-type-here\n  - #🎞️・edithub-bot-testing\n\n## 2. VOICE & MEDIA CHANNELS\n- 🔊 🔊・Editor Lounge\n- 🔊 #Lofi-Editing-Lounge\n- 🔊 channel 2\n- 🔊 channel 3\n- 🔊 👥・Members: 146\n- 🔊 🚀・Boost Level: 0 (0)\n\n## 3. KEY ROLES & HIERARCHY\nWick, Beemo, Quarantine, 👑 Admin, 🛡️ Moderator, 👥 Members, 🎬 Video Editor, 📸 Photo Editor, 🎨 Graphic Designer, 💫 Animator, ✨ Motion Designer, 💼 Client, ⚡ After Effects, 🎞️ Premiere Pro, 🎛️ Davinci Resolve, 📱 CapCut, ✂️ Sony Vegas, ✨ Alight Motion, 🖌️ Photoshop, 📷 Lightroom\n\n## 4. SERVER GUIDELINES & EXTRACTED RULES\n1. [#📜・rules-guidelines] 📜・COMMUNITY GUIDELINES // EDITX | The Creative Network\nWelcome to **EDITX | The Creative Network**! To maintain a productive, creative, and safe environment for all members, please review our official rules.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n### 1. 🛡️ Mutual Respect & Creative Professionalism\nTreat every member with courtesy. Hate speech, harassment, slurs, doxxing threats, or unsolicited sexual content will result in an immediate ban.\n\n### 2. 🚫 Zero Scam, Phishing, or Unauthorized Invites\n\n2. [#👋・welcome-hub] <@1543327038088417330>\n3. [#👋・welcome-hub] <@1549355784998092863>\n4. [#👋・welcome-hub] <@1499166139543060561>\n5. [#👋・welcome-hub] <@1544661816796258409>\n6. [#👋・welcome-hub] <@1547643738346623119>\n7. [#👋・welcome-hub] <@1544661816796258409>\n8. [#👋・welcome-hub] <@1544661816796258409>\n9. [#👋・welcome-hub] <@1544661816796258409>\n10. [#👋・welcome-hub] <@1535583440534110299>\n\n## 5. ACTIVE BOT CHANNELS\n• Memory Vault: #🤖・bot-memory (1549031332229943316)\n• Directives Desk: #📜・bot-rules (1549031332955299930)",
-  "dm_report_channel_1538957031455596544": "1550872261748334623"
+  "dm_report_channel_1538957031455596544": "1550872261748334623",
+  "welcomer_1553818924314001450": {
+    "enabled": true,
+    "channelId": "1553818926373412865",
+    "cardEnabled": true,
+    "dmEnabled": false,
+    "theme": "dark"
+  },
+  "aichat_muted_server_1553818924314001450": null,
+  "server_context_1553818924314001450": "# SERVER KNOWLEDGE BASE & AUDIT: EDITS\n• Server ID: 1553818924314001450\n• Member Count: 4\n• Owner ID: 1550907501506072576\n• Scanned At: 2026-09-27T17:54:31.666Z\n• Initiated By: Auto-Boot\n\n## 1. SERVER ARCHITECTURE & CHANNELS\n### Category: Information\n  - #welcome-and-rules\n  - #announcements\n\n### Category: Text Channels\n  - #general\n  - #events\n  - #ideas-and-feedback\n\n### Category: Voice Channels\n  (No text channels)\n\n### Uncategorized Channels:\n  - #🤖・bot-memory (EditX Bot Persistent State Vault • Automatic Cloud Backup • Do Not Delete)\n  - #📋・bot-rules (EditX Bot Live Custom Directives • Post rules here for the bot to follow)\n\n## 2. VOICE & MEDIA CHANNELS\n- 🔊 Lounge\n- 🔊 Community Hangout\n- 🔊 Stream Room\n\n## 3. KEY ROLES & HIERARCHY\nmod, Edit X\n\n## 4. SERVER GUIDELINES & EXTRACTED RULES\n1. [#📋・bot-rules] 📋 EditX Bot Live Directives Rulebook\nWelcome to the **Bot Directives Desk**! Any rule, instruction, or behavior you post in this channel is **automatically learned by EditX AI** in real-time.\n\n### 💡 Example Rules You Can Post:\n• `Don't reply in #・general-chat unless directly pinged.`\n• `Always recommend DaVinci Resolve or Premiere Pro for color grading questions.`\n• `If someone asks about pricing, remind them to include their local currency.`\n• `Keep answers short, friendly, and concise at all\n\n## 5. ACTIVE BOT CHANNELS\n• Memory Vault: #🤖・bot-memory (1553827186727714947)\n• Directives Desk: #📋・bot-rules (1553827188334268547)",
+  "bump_cfg_1553818924314001450": {
+    "channelId": "1553818926373412868",
+    "roleId": null
+  },
+  "directives_1553818924314001450": [],
+  "dm_report_channel_1553818924314001450": "1553827195858849796",
+  "user_active_guild_1550907501506072576": "1538957031455596544",
+  "report_msg_1554160124078198815": "1550907501506072576",
+  "report_msg_1554160219083243596": "1550907501506072576",
+  "report_msg_1554160409890660383": "1550907501506072576",
+  "welcomed_1553818924314001450_1250486089550921872": 1790611124469,
+  "report_msg_1554162816150151198": "1320083615475830797"
 }
