@@ -148,8 +148,8 @@ class HousekeeperModule {
     }
 
     // Evaluate with AI
-    const systemPrompt = `You are the EditX Staff AI Copilot. A user pinged the staff team with an issue.
-If the question is about video editing troubleshooting (Premiere/AE/DaVinci), Discord server roles, hiring rules, or general guidelines, provide a concise helpful answer directly.
+    const systemPrompt = `You are the ${message.guild.name} Staff AI Copilot. A user pinged the staff team with an issue.
+If the question is about server rules, roles, creative editing, or general guidelines, provide a concise helpful answer directly.
 If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment disputes, partnership deals, reporting a moderator), state that you have notified the staff team and ask the user to wait patiently.`;
 
     let replyText = '';
@@ -232,9 +232,9 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
 
   async generateBriefingEmbed(guild) {
     const incidents = (this.aiModerator && typeof this.aiModerator.getRecentIncidents === 'function')
-      ? this.aiModerator.getRecentIncidents(5)
+      ? this.aiModerator.getRecentIncidents(guild.id, 5)
       : (this.sentinel && typeof this.sentinel.getRecentIncidents === 'function')
-        ? this.sentinel.getRecentIncidents(5)
+        ? this.sentinel.getRecentIncidents(guild.id, 5)
         : [];
     const totalMembers = guild.memberCount || 1;
 

@@ -152,7 +152,14 @@ class AIModerationModule {
     return jailbreakRegexes.some(r => r.test(lower));
   }
 
-  getRecentIncidents(limit = 5) {
+  getRecentIncidents(guildId = null, limit = 5) {
+    if (typeof guildId === 'number') {
+      limit = guildId;
+      guildId = null;
+    }
+    if (guildId) {
+      return this.incidentJournal.filter(i => i.guildId === guildId).slice(-limit).reverse();
+    }
     return this.incidentJournal.slice(-limit).reverse();
   }
 
@@ -330,6 +337,7 @@ class AIModerationModule {
         reason: 'Detected malicious lookalike phishing domain or unauthorized executable link.'
       };
       this.recordIncident({
+        guildId: message.guild.id,
         category: verdict.category,
         action: 'ENFORCED',
         user: message.author.tag || message.author.username,
@@ -391,6 +399,7 @@ class AIModerationModule {
     if (verdict.flagged && verdict.confidence >= 0.70) {
       this.stats.threatsBlocked++;
       this.recordIncident({
+        guildId: message.guild.id,
         category: verdict.category,
         action: cfg.action,
         user: message.author.tag || message.author.username,
