@@ -341,8 +341,8 @@ class BotMemoryModule {
     }
 
     try {
-      const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
-      const everyoneId = guild.roles.everyone?.id || guild.id;
+      const me = guild.members?.me || (typeof guild.members?.fetchMe === 'function' ? await guild.members.fetchMe().catch(() => null) : (guild.client?.user && typeof guild.members?.fetch === 'function' ? await guild.members.fetch(guild.client.user.id).catch(() => null) : null));
+      const everyoneId = guild.roles?.everyone?.id || guild.id;
       const chan = await guild.channels.create({
         name: '🤖・bot-memory',
         type: ChannelType.GuildText,
@@ -385,8 +385,8 @@ class BotMemoryModule {
     }
 
     try {
-      const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
-      const everyoneId = guild.roles.everyone?.id || guild.id;
+      const me = guild.members?.me || (typeof guild.members?.fetchMe === 'function' ? await guild.members.fetchMe().catch(() => null) : (guild.client?.user && typeof guild.members?.fetch === 'function' ? await guild.members.fetch(guild.client.user.id).catch(() => null) : null));
+      const everyoneId = guild.roles?.everyone?.id || guild.id;
       const chan = await guild.channels.create({
         name: '📋・bot-rules',
         type: ChannelType.GuildText,
