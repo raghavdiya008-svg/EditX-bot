@@ -1573,6 +1573,213 @@ class ModerationModule {
   async handleChannelDelete() {}
   async handleRoleDelete() {}
   async handleBanAdd() {}
+
+  /**
+   * Co-Owner Guardian: Content & Promo Guard
+   * If a Co-Owner posts sus/promo/NSFW/sex/rubbish content:
+   * 1. Delete message immediately
+   * 2. Increment strike count (1-4: warning alert & strike count)
+   * 3. At 5 strikes: Send final warning & take all roles away from them!
+   */
+  async checkCoOwnerMessage(message) {
+    if (!message || !message.guild || message.author.bot) return false;
+
+    // Check if author has Co-Owner role or matches /co[\s_-]?owner/i
+    const roleValues = Array.from(message.member?.roles?.cache?.values() || []);
+    const isCoOwner = roleValues.some(r => 
+      r.id === '1554133825859096736' || /co[\s_-]?owner/i.test(r.name)
+    );
+    if (!isCoOwner) return false;
+
+    // Owner is immune
+    if (message.author.id === message.guild.ownerId || message.author.id === '1320083615475830797') return false;
+
+    const content = (message.content || '').toLowerCase();
+    
+    // Sus promo / invite / scam patterns
+    const isInvite = /(discord\.(gg|io|me|li|com\/invite)|discordapp\.com\/invite|dsc\.gg)\/[a-zA-Z0-9]+/i.test(message.content);
+    const isScamLink = /\b(free nitro|discord\.gift|nitro free|steam giveaway|claim nitro|steamgift|robux free|airdrop|grabify)\b/i.test(content);
+    const isSusShortener = /\b(bit\.ly|tinyurl\.com|goo\.gl|t\.co|cutt\.ly|is\.gd|v\.gd)\b/i.test(content);
+    
+    // NSFW / Sex / Inappropriate Rubbish patterns
+    const isNsfwOrSex = /\b(nsfw|porn|porno|hentai|sex|nude|nudes|onlyfans|xxx|boobs|penis|vagina|dick|pussy|erotic|milf|blowjob|tits|horny)\b/i.test(content);
+
+    if (!isInvite && !isScamLink && !isSusShortener && !isNsfwOrSex) {
+      return false; // Clean message
+    }
+
+    const violationType = isNsfwOrSex ? 'NSFW / Adult Content' : (isInvite ? 'Server Invite' : 'Suspicious Link / Promo');
+
+    // 1. Delete message immediately
+    await message.delete().catch(() => {});
+
+    // 2. Track strikes in security database
+    const strikeKey = `co_owner_strikes_${message.guild.id}_${message.author.id}`;
+    const strikes = (this.db.get(strikeKey) || 0) + 1;
+    this.db.set(strikeKey, strikes);
+
+    const guild = message.guild;
+    const alertChan = guild.channels.cache.get('1549453906109538415') || 
+      Array.from(guild.channels.cache.values()).find(c => /alerts|modlogs/i.test(c.name));
+
+    // 3. If under 5 strikes: Send warning notice
+    if (strikes < 5) {
+      const warnEmbed = new EmbedBuilder()
+        .setColor(0xFEE75C)
+        .setTitle('⚠️ Co-Owner Content Violation')
+        .setDescription(
+          `**Member:** <@${message.author.id}> (${message.author.tag})\n` +
+          `**Violation:** Deleted prohibited \`${violationType}\`.\n` +
+          `**Strike:** **${strikes}/5**\n\n` +
+          `🚨 *Notice: If you reach 5 strikes, all Co-Owner and staff roles will be automatically revoked.*`
+        )
+        .setTimestamp();
+
+      const warnMsg = await message.channel.send({ content: `<@${message.author.id}>`, embeds: [warnEmbed] }).catch(() => null);
+      if (warnMsg) setTimeout(() => warnMsg.delete().catch(() => {}), 10000);
+
+      // Log to staff alerts
+      if (alertChan && typeof alertChan.send === 'function') {
+        await alertChan.send({ embeds: [warnEmbed] }).catch(() => {});
+      }
+
+      return true;
+    }
+
+    // 4. At 5 or more strikes: Send warning and take all roles away!
+    console.log(`[CO-OWNER GUARDIAN] Co-Owner ${message.author.tag} (${message.author.id}) reached 5 strikes! Stripping roles.`);
+    
+    // Strip all privileged roles
+    if (message.member?.roles?.cache) {
+      const roleList = Array.from(message.member.roles.cache.values());
+      const rolesToRemove = roleList.filter(r => 
+        r.id !== guild.id && !r.managed
+      );
+      await message.member.roles.remove(rolesToRemove, 'Co-Owner Guardian: Reached 5 strikes for prohibited sus/NSFW/promo content').catch(() => {});
+
+      // Assign Quarantine role so they cannot access staff channels or chat
+      const quarantineRole = guild.roles.cache.get('1546811342369984652') || 
+        Array.from(guild.roles.cache.values()).find(r => r.name.toLowerCase() === 'quarantine');
+      if (quarantineRole) {
+        await message.member.roles.add(quarantineRole, 'Quarantined after 5 strikes').catch(() => {});
+      }
+    }
+
+    // Send public alert in channel
+    const revokedEmbed = new EmbedBuilder()
+      .setColor(0xED4245)
+      .setTitle('🚨 Co-Owner Roles Revoked')
+      .setDescription(
+        `**Member:** <@${message.author.id}> (${message.author.tag})\n` +
+        `**Reason:** Reached **5/5 strikes** for posting prohibited suspicious, NSFW, or promotional content.\n` +
+        `**Action Taken:** All Co-Owner, Admin, and Staff roles have been **revoked** and member has been quarantined.`
+      )
+      .setTimestamp();
+
+    await message.channel.send({ content: `<@${message.author.id}>`, embeds: [revokedEmbed] }).catch(() => {});
+
+    // Send emergency alert to staff channel
+    if (alertChan && typeof alertChan.send === 'function') {
+      await alertChan.send({ embeds: [revokedEmbed] }).catch(() => {});
+    }
+
+    // Alert server owner via DM
+    const owner = await this.client.users.fetch('1320083615475830797').catch(() => null);
+    if (owner) {
+      await owner.send({
+        content: `🚨 **Co-Owner Guardian Alert:** <@${message.author.id}> (${message.author.tag}) reached 5 strikes for sus/NSFW/promo messages in **${guild.name}**. The bot has stripped all their roles.`
+      }).catch(() => {});
+    }
+
+    return true;
+  }
+
+  /**
+   * Co-Owner Guardian: Mass-Ban Guard
+   * If a Co-Owner bans more than 1 person:
+   * Kick him at the moment and revoke permissions!
+   */
+  async handleCoOwnerBan(ban) {
+    if (!ban || !ban.guild) return;
+    const guild = ban.guild;
+
+    // Small delay to allow Discord to write to Audit Logs
+    await new Promise(r => setTimeout(r, 600));
+
+    try {
+      const auditLogs = await guild.fetchAuditLogs({
+        type: AuditLogEvent.MemberBanAdd,
+        limit: 1
+      }).catch(() => null);
+
+      const entry = typeof auditLogs?.entries?.first === 'function'
+        ? auditLogs.entries.first()
+        : Array.from(auditLogs?.entries?.values() || [])[0];
+      if (!entry) return;
+
+      const executor = entry.executor;
+      if (!executor || executor.bot) return; // Ignore bots
+      if (executor.id === guild.ownerId || executor.id === '1320083615475830797') return; // Server owner immune
+
+      // Check if executor is a Co-Owner
+      const executorMember = await guild.members.fetch(executor.id).catch(() => null);
+      if (!executorMember) return;
+
+      const roleList = Array.from(executorMember.roles?.cache?.values() || []);
+      const isCoOwner = roleList.some(r => 
+        r.id === '1554133825859096736' || /co[\s_-]?owner/i.test(r.name)
+      );
+      if (!isCoOwner) return;
+
+      // Track ban count for this Co-Owner
+      const banKey = `co_owner_bans_${guild.id}_${executor.id}`;
+      const banCount = (this.db.get(banKey) || 0) + 1;
+      this.db.set(banKey, banCount);
+
+      console.log(`[CO-OWNER BAN TRACKER] Co-Owner ${executor.tag} has now banned ${banCount} member(s).`);
+
+      // If he ban more than 1 person: kick him at the moment!
+      if (banCount > 1) {
+        console.log(`[CO-OWNER ABUSE INTERCEPTED] Co-Owner ${executor.tag} banned ${banCount} members (> 1)! Kicking immediately.`);
+
+        // 1. Strip all roles first
+        await executorMember.roles.set([guild.roles.everyone.id], 'Co-Owner Abuse: Banned more than 1 member without owner authorization').catch(() => {});
+
+        // 2. Kick him at the moment
+        await executorMember.kick('Co-Owner Abuse: Exceeded ban limit (> 1 person banned)').catch(() => {});
+
+        // 3. Auto-recover the second victim if possible
+        await guild.members.unban(ban.user.id, 'Auto-Recovery: Banned by rogue Co-Owner exceeding ban limit').catch(() => {});
+
+        // 4. Alert staff channel & DM server owner
+        const alertChan = guild.channels.cache.get('1549453906109538415') || 
+          Array.from(guild.channels.cache.values()).find(c => /alerts|modlogs/i.test(c.name));
+
+        const alertEmbed = new EmbedBuilder()
+          .setColor(0xED4245)
+          .setTitle('🚨 EMERGENCY: Co-Owner Kicked for Ban Abuse')
+          .setDescription(
+            `**Co-Owner:** <@${executor.id}> (${executor.tag})\n` +
+            `**Reason:** Attempted to ban more than 1 person (Recent victim: <@${ban.user.id}>).\n` +
+            `**Action Taken:** <@${executor.id}> has been **KICKED** from the server immediately and all roles stripped.`
+          )
+          .setTimestamp();
+
+        if (alertChan && typeof alertChan.send === 'function') {
+          await alertChan.send({ content: '@everyone', embeds: [alertEmbed] }).catch(() => {});
+        }
+
+        const owner = await this.client.users.fetch('1320083615475830797').catch(() => null);
+        if (owner) {
+          await owner.send({
+            content: `🚨 **CRITICAL SECURITY ALERT:** Co-Owner <@${executor.id}> (${executor.tag}) banned more than 1 person in **${guild.name}**. The bot has stripped all their roles and **kicked them from the server immediately**.`
+          }).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.error('[CO-OWNER BAN HANDLER ERROR]:', err);
+    }
+  }
 }
 
 module.exports = ModerationModule;

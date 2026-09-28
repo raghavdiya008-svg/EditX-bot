@@ -3110,6 +3110,137 @@ async function runTests() {
     assert.ok(resStatus.getBody().includes('EDITX | The Creative Network'), 'Status must include guild info');
   });
 
+  await test('43. Co-Owner Guardian: Mass-Ban Kick Guard & 5-Strike Sus/NSFW/Promo Content Stripper', async () => {
+    const ModerationModule = require('./modules/moderation');
+    const mockDb = {
+      security: new Map(),
+      cases: new Map(),
+      config: new Map()
+    };
+    const mockClient = {
+      user: { id: 'bot_id', tag: 'EditX#0799' },
+      users: { fetch: async () => ({ send: async () => {} }) }
+    };
+    const mod = new ModerationModule(mockClient, mockDb);
+
+    const coOwnerRole = { id: '1554133825859096736', name: 'CO OWNER', managed: false };
+    const adminRole = { id: '1538964378026516673', name: 'Admin', managed: false };
+    const quarantineRole = { id: '1546811342369984652', name: 'Quarantine', managed: false };
+    const everyoneRole = { id: 'guild_1', name: '@everyone', managed: false };
+
+    let strippedRoles = [];
+    let addedRoles = [];
+    let isKicked = false;
+    let deletedMessage = false;
+
+    const coOwnerMember = {
+      id: 'co_owner_user_1',
+      roles: {
+        cache: new Map([
+          [coOwnerRole.id, coOwnerRole],
+          [adminRole.id, adminRole]
+        ]),
+        remove: async (roles) => { strippedRoles.push(...(Array.isArray(roles) ? roles : Array.from(roles.values()))); },
+        add: async (role) => { addedRoles.push(role); },
+        set: async (roles) => { strippedRoles.push('ALL_SET_TO_EVERYONE'); }
+      },
+      kick: async (reason) => { isKicked = true; }
+    };
+
+    const mockGuild = {
+      id: 'guild_1',
+      name: 'EDITX | The Creative Network',
+      ownerId: '1320083615475830797',
+      roles: {
+        everyone: everyoneRole,
+        cache: new Map([
+          [coOwnerRole.id, coOwnerRole],
+          [adminRole.id, adminRole],
+          [quarantineRole.id, quarantineRole],
+          [everyoneRole.id, everyoneRole]
+        ])
+      },
+      channels: {
+        cache: new Map([
+          ['alert_chan', { id: 'alert_chan', name: 'alerts', send: async () => {} }]
+        ])
+      },
+      members: {
+        fetch: async (id) => (id === 'co_owner_user_1' ? coOwnerMember : null),
+        unban: async () => {}
+      },
+      fetchAuditLogs: async () => ({
+        entries: new Map([
+          ['entry_1', { executor: { id: 'co_owner_user_1', tag: 'BadCoOwner#0001', bot: false } }]
+        ])
+      })
+    };
+
+    // --- PART 1: Check Co-Owner Sus / NSFW / Promo messages & 5 strikes ---
+    // Test 1: Normal clean message
+    const cleanMsg = {
+      guild: mockGuild,
+      author: { id: 'co_owner_user_1', tag: 'CoOwner#0001', bot: false },
+      member: coOwnerMember,
+      content: 'Hey guys, check out the new video edit draft',
+      delete: async () => { deletedMessage = true; },
+      channel: { send: async () => ({ delete: async () => {} }) }
+    };
+    deletedMessage = false;
+    const handledClean = await mod.checkCoOwnerMessage(cleanMsg);
+    assert.strictEqual(handledClean, false, 'Clean message must not be flagged');
+    assert.strictEqual(deletedMessage, false, 'Clean message must not be deleted');
+
+    // Test 2: Sus invite promo (Strike 1)
+    const inviteMsg = { ...cleanMsg, content: 'Join my new server discord.gg/susinvite now!' };
+    deletedMessage = false;
+    const handledInvite = await mod.checkCoOwnerMessage(inviteMsg);
+    assert.strictEqual(handledInvite, true, 'Invite must be intercepted');
+    assert.strictEqual(deletedMessage, true, 'Invite message must be deleted');
+    assert.strictEqual(mockDb.security.get(`co_owner_strikes_${mockGuild.id}_co_owner_user_1`), 1, 'Strike count must be 1');
+
+    // Test 3: Free Nitro scam link (Strike 2)
+    deletedMessage = false;
+    await mod.checkCoOwnerMessage({ ...cleanMsg, content: 'Free nitro giveaway click here discord.gift/nitro free' });
+    assert.strictEqual(deletedMessage, true, 'Scam link must be deleted');
+    assert.strictEqual(mockDb.security.get(`co_owner_strikes_${mockGuild.id}_co_owner_user_1`), 2, 'Strike count must be 2');
+
+    // Test 4: Sus shortener link (Strike 3)
+    deletedMessage = false;
+    await mod.checkCoOwnerMessage({ ...cleanMsg, content: 'Check bit.ly/freestuff' });
+    assert.strictEqual(deletedMessage, true, 'Sus shortener must be deleted');
+    assert.strictEqual(mockDb.security.get(`co_owner_strikes_${mockGuild.id}_co_owner_user_1`), 3, 'Strike count must be 3');
+
+    // Test 5: NSFW / sexual word (Strike 4)
+    deletedMessage = false;
+    await mod.checkCoOwnerMessage({ ...cleanMsg, content: 'look at this nude porn pic' });
+    assert.strictEqual(deletedMessage, true, 'NSFW message must be deleted');
+    assert.strictEqual(mockDb.security.get(`co_owner_strikes_${mockGuild.id}_co_owner_user_1`), 4, 'Strike count must be 4');
+    assert.strictEqual(strippedRoles.length, 0, 'Roles must not be stripped before 5 strikes');
+
+    // Test 6: 5th violation -> Roles stripped & quarantined!
+    deletedMessage = false;
+    await mod.checkCoOwnerMessage({ ...cleanMsg, content: 'another sex link' });
+    assert.strictEqual(deletedMessage, true, '5th violation message must be deleted');
+    assert.strictEqual(mockDb.security.get(`co_owner_strikes_${mockGuild.id}_co_owner_user_1`), 5, 'Strike count must be 5');
+    assert.ok(strippedRoles.length > 0, 'Roles must be stripped at 5 strikes');
+    assert.ok(addedRoles.some(r => r.id === quarantineRole.id), 'Quarantine role must be assigned at 5 strikes');
+
+    // --- PART 2: Mass-Ban Guard (> 1 person banned = kick at the moment) ---
+    isKicked = false;
+    // Ban #1: First ban allowed/tracked
+    const ban1 = { guild: mockGuild, user: { id: 'victim_1', tag: 'Victim1#0001' } };
+    await mod.handleCoOwnerBan(ban1);
+    assert.strictEqual(isKicked, false, 'Co-Owner must not be kicked on 1st ban');
+    assert.strictEqual(mockDb.security.get(`co_owner_bans_${mockGuild.id}_co_owner_user_1`), 1, 'Ban count must be 1');
+
+    // Ban #2: Second ban (> 1 person) -> MUST KICK AT THE MOMENT!
+    const ban2 = { guild: mockGuild, user: { id: 'victim_2', tag: 'Victim2#0002' } };
+    await mod.handleCoOwnerBan(ban2);
+    assert.strictEqual(isKicked, true, 'Co-Owner MUST be kicked at the moment when banning > 1 person');
+    assert.strictEqual(mockDb.security.get(`co_owner_bans_${mockGuild.id}_co_owner_user_1`), 2, 'Ban count must be 2');
+  });
+
   console.log('\n====================================================');
   console.log(`🏁 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('====================================================\n');

@@ -525,6 +525,10 @@ client.on(Events.MessageCreate, async (message) => {
   // 0. Track message for Ghost-Ping detection
   housekeeper.trackMessage(message);
 
+  // 0b. Co-Owner Guardian: Prohibits sus/NSFW/promo/rubbish messages & auto-strips roles at 5 strikes
+  const handledCoOwner = await moderation.checkCoOwnerMessage(message);
+  if (handledCoOwner) return;
+
   // 1. Honeypot Trap: unauthorized accounts speaking in honeypot are softbanned immediately
   const isHoneypot = await moderation.checkHoneypot(message);
   if (isHoneypot) return;
@@ -593,6 +597,15 @@ client.on(Events.MessageDelete, async (message) => {
     await housekeeper.handleMessageDelete(message);
   } catch (err) {
     console.error(`[ISOLATED ERROR in MessageDelete ${message.guild?.id}]:`, err.message);
+  }
+});
+
+// Co-Owner Mass-Ban Guard Listener: Kicks Co-Owner if they ban more than 1 member
+client.on(Events.GuildBanAdd, async (ban) => {
+  try {
+    await moderation.handleCoOwnerBan(ban);
+  } catch (err) {
+    console.error(`[ISOLATED ERROR in GuildBanAdd ${ban.guild?.id}]:`, err.message);
   }
 });
 
