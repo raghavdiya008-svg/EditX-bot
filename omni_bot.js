@@ -34,7 +34,6 @@ const TranslatorModule = require('./modules/translator');
 const LevelingModule = require('./modules/leveling');
 const GiveawaysModule = require('./modules/giveaways');
 const StarboardModule = require('./modules/starboard');
-const SocialAlertsModule = require('./modules/social_alerts');
 const AIChatModule = require('./modules/ai_chat');
 const BotMemoryModule = require('./modules/bot_memory');
 const DMReminderModule = require('./modules/dm_reminder');
@@ -53,7 +52,6 @@ const db = {
   starboard: new JSONDatabase('starboard'),
   tags: new JSONDatabase('tags'),
   verification: new JSONDatabase('verification'),
-  social: new JSONDatabase('social'),
   hiring: new JSONDatabase('hiring'),
   dm: new JSONDatabase('dm')
 };
@@ -109,7 +107,6 @@ const hiring = new HiringModule(client, db);
 const translator = new TranslatorModule(client, db);
 const giveaways = new GiveawaysModule(client, db);
 const starboard = new StarboardModule(client, db);
-const socialAlerts = new SocialAlertsModule(client, db);
 const aiChat = new AIChatModule(client, db, botMemory);
 aiChat.setHousekeeper(housekeeper);
 const dmReminder = new DMReminderModule(client, db);
@@ -143,7 +140,6 @@ const modules = [
   leveling,
   giveaways,
   starboard,
-  socialAlerts,
   aiChat,
   dmReminder
 ];

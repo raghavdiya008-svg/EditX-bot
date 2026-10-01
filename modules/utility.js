@@ -176,7 +176,7 @@ class UtilityModule {
           { label: 'Leveling & XP', value: 'help_leveling', emoji: '📈', description: 'Rank cards, voice/chat XP progression, leaderboard' },
           { label: 'Starboard, Tags & Sticky', value: 'help_tags', emoji: '📌', description: 'Sticky messages, Carl-bot TagScript, autoresponders, starboard' },
           { label: 'Server Utilities', value: 'help_utility', emoji: '🛠️', description: 'Polls, suggestions, reminders, server stats, info tools' },
-          { label: 'Giveaways & Social Alerts', value: 'help_extra', emoji: '🎉', description: 'Interactive giveaways and automated YouTube/RSS alerts' }
+          { label: 'Interactive Giveaways', value: 'help_extra', emoji: '🎉', description: 'Interactive community giveaway management' }
         ])
     );
   }
@@ -266,14 +266,13 @@ class UtilityModule {
         .setFooter({ text: 'Omni Tools Suite • Analytics & Engagement' });
     } else if (category === 'help_extra') {
       embed.setColor(0xEC4899)
-        .setAuthor({ name: 'Omni Media • Giveaways & Socials', iconURL: botAvatar })
-        .setTitle('🎉 Giveaways & Automated Social Alerts')
-        .setDescription('Interactive giveaway management and automated social notifications.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        .setAuthor({ name: 'Omni Media • Giveaways', iconURL: botAvatar })
+        .setTitle('🎉 Interactive Giveaways')
+        .setDescription('Interactive giveaway management and prize drawings.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
         .addFields(
-          { name: '🎉 Interactive Giveaways', value: '▸ `/giveaway start <duration> <winners> <prize>` • Host interactive giveaway\n▸ `/giveaway reroll`, `/giveaway end`' },
-          { name: '🔔 Automated Social Alerts', value: '▸ `/alert youtube` • New video upload notifications\n▸ `/alert twitch` • Streamer live alerts\n▸ `/alert reddit` • Subreddit post notifications\n▸ `/alert rss` • RSS feed updates' }
+          { name: '🎉 Interactive Giveaways', value: '▸ `/giveaway start <duration> <winners> <prize>` • Host interactive giveaway\n▸ `/giveaway reroll`, `/giveaway end`' }
         )
-        .setFooter({ text: 'Omni Media Engine • Social & Community Automation' });
+        .setFooter({ text: 'Omni Community Suite • Giveaway Management' });
     }
 
     return embed;

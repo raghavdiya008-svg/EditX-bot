@@ -1,5 +1,31 @@
-const { Client } = require('discord.js');
-const JSONDatabase = require('../database');
+const mockDb = {
+  get: () => null,
+  set: () => {},
+  delete: () => {},
+  has: () => false,
+  entries: () => [],
+  keys: () => [],
+  values: () => []
+};
+
+const db = {
+  config: mockDb,
+  xp: mockDb,
+  security: mockDb,
+  cases: mockDb,
+  tickets: mockDb,
+  invites: mockDb,
+  roles: mockDb,
+  utility: mockDb,
+  giveaways: mockDb,
+  starboard: mockDb,
+  tags: mockDb,
+  verification: mockDb,
+  hiring: mockDb,
+  dm: mockDb
+};
+
+const dummyClient = { user: { id: 'dummy' } };
 
 // Instantiate modules
 const QuickSetupModule = require('../modules/quick_setup');
@@ -8,39 +34,16 @@ const TicketsModule = require('../modules/tickets');
 const ModerationModule = require('../modules/moderation');
 const DecorationModule = require('../modules/decoration');
 const RolesModule = require('../modules/roles');
-const LoggingModule = require('../modules/logging');
 const AIModerationModule = require('../modules/ai_moderator');
-const HousekeeperModule = require('../modules/housekeeper');
 const TagsModule = require('../modules/tags');
 const HiringModule = require('../modules/hiring');
 const TranslatorModule = require('../modules/translator');
 const LevelingModule = require('../modules/leveling');
 const GiveawaysModule = require('../modules/giveaways');
 const StarboardModule = require('../modules/starboard');
-const SocialAlertsModule = require('../modules/social_alerts');
-const AIChatModule = require('../modules/ai_chat');
 const BotMemoryModule = require('../modules/bot_memory');
 const DMReminderModule = require('../modules/dm_reminder');
 const DashboardModule = require('../modules/dashboard');
-
-const dummyClient = { user: { id: 'dummy' } };
-const db = {
-  config: new JSONDatabase('dummy_cfg'),
-  xp: new JSONDatabase('dummy_xp'),
-  security: new JSONDatabase('dummy_sec'),
-  cases: new JSONDatabase('dummy_cases'),
-  tickets: new JSONDatabase('dummy_tickets'),
-  invites: new JSONDatabase('dummy_inv'),
-  roles: new JSONDatabase('dummy_roles'),
-  utility: new JSONDatabase('dummy_util'),
-  giveaways: new JSONDatabase('dummy_gw'),
-  starboard: new JSONDatabase('dummy_star'),
-  tags: new JSONDatabase('dummy_tags'),
-  verification: new JSONDatabase('dummy_ver'),
-  social: new JSONDatabase('dummy_soc'),
-  hiring: new JSONDatabase('dummy_hiring'),
-  dm: new JSONDatabase('dummy_dm')
-};
 
 const moduleList = [
   { name: '🛡️ Moderation & Enforcement', mod: new ModerationModule(dummyClient, db) },
@@ -89,3 +92,4 @@ moduleList.forEach(m => {
 
 console.log(`TOTAL REGISTERED SLASH COMMANDS: ${totalCmds}`);
 console.log(JSON.stringify(catalog, null, 2));
+process.exit(0);

@@ -7,47 +7,13 @@ const rssParser = new Parser({
 class SocialAlertsModule {
   constructor(client, db) {
     this.client = client;
-    this.db = db.social;
-
-    // Check feeds every 5 minutes
-    setInterval(() => this.checkFeeds(), 5 * 60 * 1000);
+    this.db = db?.social;
+    // Background polling decommissioned (useless for server operations)
   }
 
   getCommands() {
-    return [
-      new SlashCommandBuilder().setName('alert').setDescription('Configure automated social media, stream, and RSS notifications')
-        .addSubcommandGroup(g => g.setName('youtube').setDescription('Automated YouTube upload notifications')
-          .addSubcommand(s => s.setName('add').setDescription('Add YouTube channel alert')
-            .addStringOption(o => o.setName('channel_id').setDescription('YouTube Channel ID (e.g. UCxxxxxxxx)').setRequired(true))
-            .addChannelOption(o => o.setName('discord_channel').setDescription('Discord channel to post notifications').addChannelTypes(ChannelType.GuildText).setRequired(true))
-            .addStringOption(o => o.setName('custom_message').setDescription('Custom message (e.g. @everyone New video from {author}!)')))
-          .addSubcommand(s => s.setName('remove').setDescription('Remove YouTube channel alert')
-            .addStringOption(o => o.setName('channel_id').setDescription('YouTube Channel ID').setRequired(true)))
-          .addSubcommand(s => s.setName('list').setDescription('List active YouTube alerts')))
-        .addSubcommandGroup(g => g.setName('reddit').setDescription('Automated Reddit subreddit post alerts')
-          .addSubcommand(s => s.setName('add').setDescription('Add Subreddit post alert')
-            .addStringOption(o => o.setName('subreddit').setDescription('Subreddit name (e.g. gaming, news)').setRequired(true))
-            .addChannelOption(o => o.setName('discord_channel').setDescription('Discord channel to post updates').addChannelTypes(ChannelType.GuildText).setRequired(true)))
-          .addSubcommand(s => s.setName('remove').setDescription('Remove Subreddit alert')
-            .addStringOption(o => o.setName('subreddit').setDescription('Subreddit name').setRequired(true)))
-          .addSubcommand(s => s.setName('list').setDescription('List active Subreddit alerts')))
-        .addSubcommandGroup(g => g.setName('twitch').setDescription('Automated Twitch streamer live alerts')
-          .addSubcommand(s => s.setName('add').setDescription('Add Twitch stream alert')
-            .addStringOption(o => o.setName('streamer').setDescription('Twitch streamer username').setRequired(true))
-            .addChannelOption(o => o.setName('discord_channel').setDescription('Discord channel to post alerts').addChannelTypes(ChannelType.GuildText).setRequired(true))
-            .addStringOption(o => o.setName('custom_message').setDescription('Custom message (e.g. @everyone {streamer} is live!)')))
-          .addSubcommand(s => s.setName('remove').setDescription('Remove Twitch streamer alert')
-            .addStringOption(o => o.setName('streamer').setDescription('Streamer username').setRequired(true)))
-          .addSubcommand(s => s.setName('list').setDescription('List active Twitch streamer alerts')))
-        .addSubcommandGroup(g => g.setName('rss').setDescription('Automated RSS feed notifications')
-          .addSubcommand(s => s.setName('add').setDescription('Add RSS feed alert')
-            .addStringOption(o => o.setName('feed_url').setDescription('Direct RSS/Atom feed URL').setRequired(true))
-            .addChannelOption(o => o.setName('discord_channel').setDescription('Discord channel to post updates').addChannelTypes(ChannelType.GuildText).setRequired(true)))
-          .addSubcommand(s => s.setName('remove').setDescription('Remove RSS feed alert')
-            .addStringOption(o => o.setName('feed_url').setDescription('Feed URL').setRequired(true)))
-          .addSubcommand(s => s.setName('list').setDescription('List active RSS alerts')))
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).setDMPermission(false)
-    ];
+    // Slash commands (/alert youtube, reddit, twitch, rss) decommissioned and pruned
+    return [];
   }
 
   async handleCommand(interaction) {
