@@ -537,6 +537,10 @@ client.on(Events.MessageCreate, async (message) => {
   const isBlockedPromo = await moderation.checkPromoRestriction(message);
   if (isBlockedPromo) return;
 
+  // 1c. Automod & Nitro Guard: Word 'nitro' deletion, anti-invite links, bad words & flood spam
+  const isModAllowed = await moderation.checkMessage(message);
+  if (isModAllowed === false) return;
+
   // 2. AI Moderation & Security Sentinel (Sliding context, instant phishing detection, jailbreak guard & mod copilot)
   const allowed = await aiModerator.checkMessage(message);
   if (allowed === false) return;

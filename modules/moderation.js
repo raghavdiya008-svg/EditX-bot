@@ -1408,19 +1408,35 @@ class ModerationModule {
 
     if (isStaffOrAdmin) return false;
 
-    // 3. Promo content detection
+    // 3. Comprehensive Promo, Advertising & Freelance Solicitation detection
     const text = message.content || '';
-    const PROMO_REGEX = new RegExp([
-      'https?:\\/\\/(www\\.)?(youtube\\.com|youtu\\.be|twitch\\.tv|tiktok\\.com|instagram\\.com|twitter\\.com|x\\.com|t\\.me|linktr\\.ee|bento\\.me|carrd\\.co|beacons\\.ai)',
-      'discord(\\.(gg|io|me|li)|\\.com\\/invite)\\/.+',
-      '\\b(promo|promotion|self-?promo|advertise|advertising)\\b',
-      '\\b(check out my|sub to my|subscribe to my|follow my|join my|join our)\\b',
-      '\\b(my (youtube|channel|stream|server|tiktok|ig|instagram|discord|portfolio))\\b',
-      '\\b(dm for (edits|prices|work|commissions?|hire)|commissions? open|for hire|hire me)\\b',
-      '\\b(buy my|selling my|selling presets?|cheap edits?|paid edits?)\\b'
-    ].join('|'), 'i');
+    const PROMO_PATTERNS = [
+      // 1. Socials, link trees, portfolios & invite links
+      /https?:\/\/(www\.)?(youtube\.com|youtu\.be|twitch\.tv|tiktok\.com|instagram\.com|twitter\.com|x\.com|t\.me|linktr\.ee|bento\.me|carrd\.co|beacons\.ai|artstation\.com|behance\.net)/i,
+      /discord(\.(gg|io|me|li)|\.com\/invite)\/.+/i,
 
-    const isPromo = PROMO_REGEX.test(text);
+      // 2. Explicit promo & advertising keywords
+      /\b(promo|promotion|self-?promo|advertise|advertising)\b/i,
+      /\b(check out my|sub to my|subscribe to my|follow my|join my|join our)\b/i,
+      /\b(my (youtube|channel|stream|server|tiktok|ig|instagram|discord|portfolio|website))\b/i,
+
+      // 3. Freelance service offerings, commissions & client solicitation
+      /\b(available for (freelance|work|hire|projects?|clients?))\b/i,
+      /\b(freelance (video editor|editor|artist|designer|animator|work))\b/i,
+      /\b(i('?m| am) a (professional )?(video editor|editor|designer|animator))\b/i,
+      /\b(i specialize in:?|specializing in)\b/i,
+      /\b(open for (work|commissions?|clients?|projects?))\b/i,
+      /\b(taking (commissions?|clients?|projects?|orders?))\b/i,
+      /\b(for hire|hire me|hire an editor|editor for hire)\b/i,
+      /\b(dm (me )?for (edits|prices|work|commissions?|hire|rates|portfolio))\b/i,
+      /\b(feel free to dm me|send me a (direct )?message|dm me if you need|reach out if you need)\b/i,
+      /\b(struggling with (a )?(heavy )?(video )?editing workload|i can help you with (your )?(edits|editing|workload))\b/i,
+      /\b(buy my|selling my|selling presets?|cheap edits?|paid edits?)\b/i,
+      /\b(looking for (clients|paid work|editing gigs))\b/i,
+      /\b(rates?:\s*\$|pricing:\s*\$|contact:\s*(dm|email))\b/i
+    ];
+
+    const isPromo = PROMO_PATTERNS.some(p => p.test(text));
     if (!isPromo) return false;
 
     // 4. Action: Reply "no promo in this channel use the #self-promotions channel only" and delete message
