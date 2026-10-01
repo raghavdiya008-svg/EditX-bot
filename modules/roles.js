@@ -572,7 +572,7 @@ class RolesModule {
     for (const [key, data] of this.rolesDb.entries()) {
       if (key.startsWith('temp_') && data.expireAt && data.expireAt <= now) {
         try {
-          const guild = this.client.guilds.cache.get(data.guildId);
+          const guild = this.client?.guilds?.cache?.get(data.guildId);
           if (guild) {
             const member = await guild.members.fetch(data.userId).catch(() => null);
             if (member && member.roles.cache.has(data.roleId)) {

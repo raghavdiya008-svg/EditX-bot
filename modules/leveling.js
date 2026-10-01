@@ -373,7 +373,9 @@ class LevelingModule {
   }
 
   async processVoiceXP() {
+    if (!this.client?.guilds?.cache) return;
     for (const guild of this.client.guilds.cache.values()) {
+      if (!guild.channels?.cache) continue;
       for (const channel of guild.channels.cache.values()) {
         if (channel.isVoiceBased() && channel.members.size >= 2) { // Must be >=2 users to prevent solo idling
           for (const member of channel.members.values()) {
