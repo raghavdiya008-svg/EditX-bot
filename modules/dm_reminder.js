@@ -17,6 +17,7 @@ class DMReminderModule {
     this.db = db.dm || db.utility;
     this.utilDb = db.utility;
     this.secDb = db.security || db.config;
+    this.verifyDb = db.verification || db.utility;
     this.pendingGuildSelect = new Map(); // userId -> { content, attachments, timestamp }
   }
 
@@ -62,6 +63,10 @@ class DMReminderModule {
         .addSubcommand(s =>
           s.setName('invite')
             .setDescription('Send a one-time DM to members asking them to reply READY for notifications')
+        )
+        .addSubcommand(s =>
+          s.setName('verify')
+            .setDescription('Send a one-time verification reminder DM to all 0-role unverified members')
         )
         .addSubcommandGroup(g =>
           g.setName('channel')
@@ -767,6 +772,115 @@ class DMReminderModule {
             `• ⏭️ **Skipped (Already invited or READY):** \`${skippedCount}\`\n` +
             `• ❌ **Unreachable (Closed DMs/Blocked):** \`${failedCount}\`\n` +
             `*Strictly recorded in database: no member will ever receive this invitation more than once.*`
+        });
+      }
+
+      // /dmblast verify (one-time verification reminder DM to all 0-role members)
+      if (sub === 'verify') {
+        await interaction.deferReply({ ephemeral: true });
+
+        const verifyKey = `dm_reminders_${guild.id}`;
+        const verifyRecords = this.verifyDb.get(verifyKey) || {};
+
+        let members = [];
+        try {
+          if (guild.members?.fetch) {
+            const fetched = await guild.members.fetch().catch(() => null);
+            if (fetched) members = Array.from(fetched.values());
+          }
+          if (members.length === 0 && guild.members?.cache) {
+            members = Array.from(guild.members.cache.values());
+          }
+        } catch (e) {
+          if (guild.members?.cache) members = Array.from(guild.members.cache.values());
+        }
+
+        const candidates = members.filter(m => {
+          if (!m || m.user?.bot) return false;
+          const nonEveryone = m.roles?.cache ? m.roles.cache.filter(r => r.id !== guild.id) : [];
+          return nonEveryone.size === 0;
+        });
+
+        const verifyChan = guild.channels.cache.find(c => c.name && (c.name.includes('verify') || c.name.includes('verification'))) || { id: '1546813432282746911' };
+        const rulesChan = guild.channels.cache.find(c => c.name && c.name.includes('rules')) || { id: '1540409714289147904' };
+        const guildIcon = guild.iconURL({ dynamic: true, size: 256 }) || this.client.user.displayAvatarURL();
+
+        let sentCount = 0;
+        let skippedCount = 0;
+        let closedCount = 0;
+        let errorCount = 0;
+
+        for (const member of candidates) {
+          const userObj = member.user || member;
+          if (!userObj || userObj.bot) continue;
+
+          // Single dispatch: skip if already sent or closed
+          if (verifyRecords[userObj.id] && (verifyRecords[userObj.id].status === 'sent' || verifyRecords[userObj.id].status === 'failed_closed_dms')) {
+            skippedCount++;
+            continue;
+          }
+
+          const embed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle(`✨ Welcome to ${guild.name} — Verification Required`)
+            .setDescription(
+              `Hey **${userObj.displayName || userObj.username}**! 👋\n\n` +
+              `We noticed you joined **${guild.name}** but haven't unlocked your member access yet. Complete verification in 5 seconds to unlock full server access!\n\n` +
+              `### 🚀 How to Verify:\n` +
+              `1️⃣ Go to the <#${verifyChan.id}> channel.\n` +
+              `2️⃣ Click the green **Verify** button on the verification panel.\n` +
+              `3️⃣ You will instantly receive the **Members** role!\n\n` +
+              `### 🎁 What Unlocks When You Verify:\n` +
+              `• 🎬 **Editing Software Suites**: Premiere Pro, After Effects, DaVinci Resolve, CapCut\n` +
+              `• 🎨 **Design & 3D**: Photoshop, Lightroom, Motion Design & 3D Art lounges\n` +
+              `• 📦 **Vault of Free Resources**: SFX packs, overlays, transitions, color LUTs\n` +
+              `• 💼 **Opportunities**: Freelance & client hiring boards, collaborations, project reviews\n` +
+              `• 🏷️ **Creator Roles**: Pick your skills, editor software, and notification roles\n\n` +
+              `*Please review our rules in <#${rulesChan.id}> to keep the community creative and safe.*`
+            )
+            .setThumbnail(guildIcon)
+            .setFooter({ text: `${guild.name} Access Gateway • Mentioned once per member`, iconURL: guildIcon })
+            .setTimestamp();
+
+          const actionRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setLabel('👉 Go to #verify-here')
+              .setStyle(ButtonStyle.Link)
+              .setURL(`https://discord.com/channels/${guild.id}/${verifyChan.id}`),
+            new ButtonBuilder()
+              .setLabel('📜 Server Rules')
+              .setStyle(ButtonStyle.Link)
+              .setURL(`https://discord.com/channels/${guild.id}/${rulesChan.id}`)
+          );
+
+          try {
+            await member.send({ embeds: [embed], components: [actionRow] });
+            sentCount++;
+            verifyRecords[userObj.id] = { status: 'sent', timestamp: Date.now(), tag: userObj.tag || userObj.username };
+          } catch (err) {
+            if (err.code === 50007) {
+              closedCount++;
+              verifyRecords[userObj.id] = { status: 'failed_closed_dms', timestamp: Date.now(), tag: userObj.tag || userObj.username };
+            } else {
+              errorCount++;
+              verifyRecords[userObj.id] = { status: 'failed', timestamp: Date.now(), tag: userObj.tag || userObj.username, error: err.message };
+            }
+          }
+
+          // Rate limit protection
+          await new Promise(r => setTimeout(r, 1200));
+        }
+
+        this.verifyDb.set(verifyKey, verifyRecords);
+
+        return interaction.editReply({
+          content: `✅ **Verification DM Dispatch Complete!**\n` +
+            `• 👥 **0-Role Members Evaluated:** \`${candidates.length}\`\n` +
+            `• 📩 **DMs Delivered:** \`${sentCount}\`\n` +
+            `• ⏭️ **Skipped (Already Contacted):** \`${skippedCount}\`\n` +
+            `• 🔒 **Closed DMs (Unreachable):** \`${closedCount}\`\n` +
+            `• ❌ **Other Errors:** \`${errorCount}\`\n` +
+            `*All records saved — no member will be sent this reminder more than once.*`
         });
       }
 

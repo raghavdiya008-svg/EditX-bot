@@ -114,7 +114,7 @@ const dashboard = new DashboardModule(client, db, botMemory);
 client.dashboard = dashboard;
 
 // Built-in HTTP Health Check & Cockpit Dashboard Server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3005;
 http.createServer((req, res) => {
   dashboard.handleHttpRequest(req, res);
 }).listen(PORT, () => {

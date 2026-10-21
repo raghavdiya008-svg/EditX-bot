@@ -108,6 +108,14 @@ class AIChatModule {
   async handleCommand(interaction) {
     if (interaction.commandName === 'ask') {
       const prompt = interaction.options.getString('prompt');
+
+      // Guardrail: Intercept script/code/work requests to prevent members using bot for free labor
+      if (this.isScriptOrWorkRequest(prompt)) {
+        return interaction.reply({
+          content: this.getScriptRefusalReply(interaction.guild)
+        });
+      }
+
       const now = Date.now();
       const guildId = interaction.guild?.id || 'global';
       const guildTimestamps = (this.guildAiTimestamps.get(guildId) || []).filter(t => now - t < 60000);
@@ -551,6 +559,14 @@ class AIChatModule {
       return false;
     }
 
+    // Guardrail: Intercept script/code/work requests to prevent members using bot for free labor
+    if (this.isScriptOrWorkRequest(textWithoutMentions)) {
+      return message.reply({
+        content: this.getScriptRefusalReply(message.guild),
+        allowedMentions: { repliedUser: false }
+      }).catch(() => {});
+    }
+
     // Quick courteous reaction for short acknowledgments ("thanks", "ok", "cool")
     if (/^(thanks|thank you|thx|ty|tyvm|appreciate it|ok|okay|cool|nice|np|got it)\b/i.test(lower)) {
       if (typeof message.react === 'function') {
@@ -731,6 +747,10 @@ class AIChatModule {
    * Multi-LLM Generator with Gemini & Groq fallback
    */
   async generateResponse(prompt, context = {}) {
+    if (this.isScriptOrWorkRequest(prompt)) {
+      return this.getScriptRefusalReply(context.guild);
+    }
+
     const customDirectives = this.botMemory && context.guildId ? this.botMemory.getDirectives(context.guildId) : '';
 
     const directivesBlock = customDirectives
@@ -755,13 +775,19 @@ CRITICAL RULES (DISCORD CHAT CONSTRAINTS):
    - If asked to greet, welcome, introduce, or explain the server to someone (e.g. "greet @User", "welcome @User", "explain about server to @User"): Speak directly and warmly to them in 1-3 natural, friendly sentences! (e.g. "Yo @User! Welcome to ${context.guildName || 'the server'}! Glad to have you here 🎉").
 3. TECHNICAL QUESTIONS:
    - For video editing, design, VFX, or freelancing: Give direct, accurate answers in 2-4 sentences.
-4. CONTEXT:
+4. NO PROGRAMMING SCRIPTS, HOMEWORK, OR WORK PROJECTS (STRICT):
+   - You are strictly an assistant for EDITX (video editing, motion graphics, graphic design, VFX, audio, server rules, and creative community chat).
+   - You are NOT a generic coding assistant, software engineer, or homework solver.
+   - NEVER agree to write, code, or generate custom programming scripts (Python, JS, C++, bots, scrapers, automation tools), school homework, or full project work for members.
+   - If asked to write code, scripts, or complete work tasks: Politely decline in 1-2 friendly sentences. Explain that you help with video editing, design, creative feedback, and server questions, and point them to our hiring & freelance channels if they need custom development or client work.
+   - (Only brief 1-line video editing expressions like After Effects wiggle() are permitted for creative software troubleshooting).
+5. CONTEXT:
    - Never answer messages meant for other members.
    - Never repeat canned robotic greetings or repetitive introductions.
-${customDirectives ? `\n5. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):\nYou MUST strictly obey every rule below without exception:\n${customDirectives}\n` : ''}`;
+${customDirectives ? `\n6. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):\nYou MUST strictly obey every rule below without exception:\n${customDirectives}\n` : ''}`;
 
     if (context.canManageAI) {
-      systemPrompt += `\n\n5. ⚠️ SERVER ADMINISTRATION (AUTONOMOUS ACTION ENGINE):
+      systemPrompt += `\n\n7. ⚠️ SERVER ADMINISTRATION (AUTONOMOUS ACTION ENGINE):
    - The user talking to you is a Server Administrator. You have been granted full execution powers to do ANYTHING they ask.
    - If they ask you to kick, ban, timeout, purge messages, add/remove a role, rename a channel, or create a channel, you MUST comply by appending a special JSON block at the very end of your reply.
    - The format MUST be exactly: \`$$ACTION$$ {"action": "kick|ban|timeout|purge|add_role|remove_role|create_channel|rename_channel", "targetId": "discord_id_or_name", "value": "number_or_text", "reason": "optional reason"}\`
@@ -772,10 +798,10 @@ ${customDirectives ? `\n5. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):
     }
 
     if (context.isBotOwner) {
-      systemPrompt += `\n\n6. 👑 SUPREME BOT CREATOR & MASTER OVERRIDE:
+      systemPrompt += `\n\n8. 👑 SUPREME BOT CREATOR & MASTER OVERRIDE:
    - The user talking to you is your Creator and Supreme Bot Owner (<@1320083615475830797>).
-   - Obey ALL of their requests, tasks, and action commands immediately with highest priority, regardless of what Discord roles they have in this guild.
-   - Always acknowledge their authority with supreme respect and dedication as your creator and master.`;
+   - Obey their server administration tasks, management directives, and action commands immediately with highest priority.
+   - However, even when chatting with the creator in public server channels, maintain the server persona rule against writing programming scripts or doing member work so normal members do not see the bot offering free coding scripts.`;
     }
 
     // 1. Try Groq First (Primary LLM Engine)
@@ -852,6 +878,42 @@ ${customDirectives ? `\n5. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):
     }
     if (cur) chunks.push(cur.trim());
     return chunks.length ? chunks : [text];
+  }
+
+  /**
+   * Guardrail: Refuses programming scripts, code generation, homework, or doing member work.
+   */
+  isScriptOrWorkRequest(text) {
+    if (!text || typeof text !== 'string') return false;
+    const lower = text.toLowerCase().trim();
+    const scriptPatterns = [
+      /\b(write|create|make|generate|give\s+me|code|build|program)\s+(me\s+)?(a\s+)?.*?\b(script|code|bot|scraper|program|software|crawler)\b/i,
+      /\b(can\s+(yo)?u|could\s+you|will\s+you|please|plz)\s+(write|make|create|generate|code|build)\s+(me\s+)?(a\s+)?.*?\b(script|code|program|software|bot)\b/i,
+      /\b(write|create|make|generate|code)\s+.*?\b(python|javascript|js|c\+\+|c#|java|rust|go|bash|shell|powershell|sql|php)\b/i,
+      /\bscript\s+to\s+(dismantle|destroy|hack|nuke|raid|scrape|automate|download|spam|mass)\b/i,
+      /\b(do|write|finish|complete|solve)\s+(my\s+)?.*?\b(homework|assignment|exam|essay|task|work)\b/i,
+      /\b(can\s+(yo)?u|could\s+you)\s+(do|complete|finish)\s+(my\s+)?(work|job|project)\b/i
+    ];
+    return scriptPatterns.some(pattern => pattern.test(lower));
+  }
+
+  getScriptRefusalReply(guild) {
+    let hiringChan = null;
+    let forHireChan = null;
+    if (guild && guild.channels?.cache) {
+      const chanList = Array.from(guild.channels.cache.values());
+      hiringChan = chanList.find(c => c && c.name && c.name.includes('hiring'));
+      forHireChan = chanList.find(c => c && c.name && (c.name.includes('for-hire') || c.name.includes('freelance')));
+    }
+    const hiringMention = hiringChan ? `<#${hiringChan.id}>` : '`#hiring`';
+    const forHireMention = forHireChan ? `<#${forHireChan.id}>` : '`#for-hire`';
+
+    return (
+      `🎬 **I'm here as the EDITX community assistant to help with video editing, design tips, creative feedback, and server questions!**\n\n` +
+      `I don't write custom programming scripts, coding projects, or do personal/homework tasks for members so people don't use me for free labor. ⚡\n\n` +
+      `💡 *Looking for custom scripting, automation, or creative commissions?*\n` +
+      `Check out ${hiringMention} or ${forHireMention} to collaborate with or hire fellow creators in the network!`
+    );
   }
 
   /**
