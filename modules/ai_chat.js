@@ -5,17 +5,20 @@
 
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 const { GoogleGenAI } = require('@google/genai');
+const AgentCore = require('./agent_core');
 
 class AIChatModule {
   constructor(client, db, botMemory = null) {
     this.client = client;
+    this.fullDb = db;
     this.db = db.utility; // Store AI chat configs
     this.securityDb = db.security; // For aimod mode changes via chat
     this.botMemory = botMemory;
-    this.geminiKey = process.env.GEMINI_API_KEY;
+    this.geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     this.groqKey = process.env.GROQ_API_KEY;
 
     this.gemini = this.geminiKey ? new GoogleGenAI({ apiKey: this.geminiKey }) : null;
+    this.agentCore = new AgentCore(client, db, botMemory);
 
     // Rate limiter & cooldowns (1 message per 3 seconds per user to prevent spam)
     this.userCooldowns = new Map();
@@ -29,6 +32,9 @@ class AIChatModule {
 
   setBotMemory(botMemory) {
     this.botMemory = botMemory;
+    if (this.agentCore) {
+      this.agentCore.setBotMemory(botMemory);
+    }
   }
 
   setHousekeeper(housekeeper) {
@@ -594,11 +600,34 @@ class AIChatModule {
     guildTimestamps.push(now);
     this.guildAiTimestamps.set(message.guild.id, guildTimestamps);
 
+    // Fetch referenced message if user is replying to a message
+    let referencedMessage = null;
+    if (message.reference && message.reference.messageId) {
+      referencedMessage = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+    }
+
+    // FAST-PATH: Direct staff command replying to a message saying "remove this" / "delete this"
+    const isDeleteReplyCmd = /^(remove|delete|purge)(\s+(this|it|that|this\s+message))?$/i.test(prompt.trim());
+    if (isDeleteReplyCmd && referencedMessage && canManageAI) {
+      try {
+        await referencedMessage.delete().catch(() => {});
+        await message.delete().catch(() => {});
+        return;
+      } catch (delErr) {
+        console.error('[AI CHAT DELETE REPLY ERROR]', delErr.message);
+      }
+    }
+
     // Send typing indicator
     await message.channel.sendTyping().catch(() => {});
 
     // Resolve mentions to readable human names in the prompt for the LLM
     let cleanPromptForLLM = prompt;
+    if (referencedMessage) {
+      const refAuthor = referencedMessage.author?.username || 'user';
+      const refContent = (referencedMessage.cleanContent || referencedMessage.content || '[Media / Attachment]').slice(0, 300);
+      cleanPromptForLLM = `[Replying to message ID ${referencedMessage.id} from @${refAuthor}: "${refContent}"]\n${cleanPromptForLLM}`;
+    }
     if (message.mentions.users && message.mentions.users.size > 0) {
       for (const [userId, user] of message.mentions.users) {
         if (userId === this.client.user.id) continue;
@@ -618,18 +647,36 @@ class AIChatModule {
       }
     }
 
-    const responseText = await this.generateResponse(cleanPromptForLLM, {
-      userName: message.member?.displayName || message.author.username,
-      guildName: message.guild.name,
-      guildId: message.guild.id,
-      canManageAI: canManageAI,
-      isBotOwner: isBotOwner
-    });
+    let responseText = '';
+    if (this.agentCore) {
+      try {
+        responseText = await this.agentCore.processAgentRequest(cleanPromptForLLM, {
+          guild: message.guild,
+          channel: message.channel,
+          author: message.author,
+          member: message.member,
+          message: message,
+          referencedMessage: referencedMessage
+        });
+      } catch (agentErr) {
+        console.warn('[AGENT CORE EXECUTION WARNING]', agentErr.message);
+      }
+    }
+
+    if (!responseText) {
+      responseText = await this.generateResponse(cleanPromptForLLM, {
+        userName: message.member?.displayName || message.author.username,
+        guildName: message.guild.name,
+        guildId: message.guild.id,
+        canManageAI: canManageAI,
+        isBotOwner: isBotOwner
+      });
+    }
 
     let finalReply = responseText;
     let actionBlock = null;
 
-    // Intercept Autonomous Engine Actions
+    // Intercept Autonomous Engine Actions (Legacy support)
     const actionMatch = responseText.match(/\$\$ACTION\$\$\s*({.*})/i);
     if (actionMatch && canManageAI) {
       finalReply = responseText.replace(/\$\$ACTION\$\$.*/i, '').trim();

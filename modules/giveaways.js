@@ -118,10 +118,17 @@ class GiveawaysModule {
   }
 
   async updateGiveawayButton(message, gw) {
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('gw_enter').setLabel(`🎉 Enter Giveaway (${gw.entrants.length})`).setStyle(ButtonStyle.Success)
-    );
-    await message.edit({ components: [row] }).catch(() => {});
+    if (!this.updateDebounce) this.updateDebounce = new Map();
+    if (this.updateDebounce.has(message.id)) return;
+    this.updateDebounce.set(message.id, true);
+    setTimeout(async () => {
+      this.updateDebounce.delete(message.id);
+      const currentGw = this.db.get(`gw_${gw.messageId}`) || gw;
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('gw_enter').setLabel(`🎉 Enter Giveaway (${currentGw.entrants.length})`).setStyle(ButtonStyle.Success)
+      );
+      await message.edit({ components: [row] }).catch(() => {});
+    }, 2500);
   }
 
   pickWinners(entrants, count) {

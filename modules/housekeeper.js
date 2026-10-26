@@ -36,11 +36,11 @@ class HousekeeperModule {
     // Cache to prevent duplicate staff ping AI replies
     this.staffPingCooldowns = new Map();
 
-    // Cleanup every 5 minutes
+    // Cleanup message tracking cache every 5 minutes
     setInterval(() => this.cleanupMessageCache(), 5 * 60 * 1000);
 
-    // 9:00 AM Daily Briefing Check
-    setInterval(() => this.checkMorningBriefing(), 60 * 1000);
+    // Note: Robotic unsolicited morning briefing timer decommissioned to prevent spam.
+    // Briefings are now served on-demand via /copilot briefing or AI agent conversation.
   }
 
   cleanupMessageCache() {
@@ -265,6 +265,7 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
 
     // Inspect recent activity in #modlogs or audit log
     let recentLogSummary = '• No recent mod actions logged in the past 12 hours.';
+    let rawLogLines = [];
     try {
       const chanList = guild.channels?.cache ? Array.from(guild.channels.cache.values()) : [];
       const logChan = chanList.find(c =>
@@ -281,6 +282,7 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
             .slice(0, 5);
 
           if (recentLogs.length > 0) {
+            rawLogLines = recentLogs.map(m => m.embeds?.[0]?.description || m.content || 'Action');
             recentLogSummary = recentLogs.map(m => {
               const preview = m.embeds?.[0]?.title || m.embeds?.[0]?.description || m.content || 'Logged event';
               return `• <t:${Math.floor(m.createdTimestamp / 1000)}:R> - ${preview.slice(0, 70)}`;
@@ -290,15 +292,57 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
       }
     } catch (e) {}
 
+    // Dynamic AI Operational Synthesis if LLM is available
+    let aiInsight = '';
+    if (this.groqKey || this.ai) {
+      const prompt = `You are the executive AI copilot for Discord server "${guild.name}".
+Telemetry:
+- Total Members: ${totalMembers}
+- Recent Incidents: ${incidents.length > 0 ? incidents.map(i => `${i.category} on ${i.user}`).join(', ') : 'None'}
+- Recent Logs: ${rawLogLines.length > 0 ? rawLogLines.join(' | ') : 'Quiet'}
+
+Write a 2-sentence executive operational assessment for the server owner. Focus on community health, security posture, and what needs attention. Tone: professional, sharp, direct.`;
+
+      if (this.groqKey) {
+        try {
+          const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${this.groqKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'qwen/qwen3.8-27b',
+              messages: [{ role: 'user', content: prompt }],
+              temperature: 0.3,
+              max_tokens: 150
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const text = data.choices?.[0]?.message?.content?.trim();
+            if (text) aiInsight = text;
+          }
+        } catch (_) {}
+      }
+
+      if (!aiInsight && this.ai) {
+        try {
+          const res = await this.ai.models.generateContent({
+            model: 'gemini-3.6-flash',
+            contents: prompt
+          });
+          if (res.text?.trim()) aiInsight = res.text.trim();
+        } catch (_) {}
+      }
+    }
+
     const embed = new EmbedBuilder()
       .setColor(0x5865F2)
       .setAuthor({
         name: `📊 Executive Server Briefing • ${guild.name}`,
-        iconURL: guild.iconURL({ dynamic: true }) || undefined
+        iconURL: (guild.iconURL && typeof guild.iconURL === 'function') ? guild.iconURL({ dynamic: true }) : undefined
       })
-      .setTitle('24/7 Autonomous Server Status Report & 12-Hour Briefing')
+      .setTitle('24/7 Autonomous Server Status Report & Executive Briefing')
       .setDescription(
-        `Here is the latest 12-hour server activity and operational summary:\n\n` +
+        `${aiInsight ? `### 🧠 AI Executive Assessment\n> ${aiInsight}\n\n` : ''}` +
         `### 📊 Community Metrics\n` +
         `> 👥 **Total Members:** \`#${totalMembers}\`\n` +
         `> 🛡️ **Autonomous Guardian:** 🟢 \`Active (24/7 Auto-Pilot)\`\n\n` +
@@ -307,9 +351,9 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
         `### 📋 Recent Logged Events (Last 12h)\n` +
         `${recentLogSummary}\n\n` +
         `### ⚡ Quick Actions\n` +
-        `Use \`/copilot briefing\`, \`/copilot summarize\`, or \`/setup audit\` anytime.`
+        `Use \`/copilot briefing\`, \`/copilot summarize\`, or ask the AI copilot directly anytime.`
       )
-      .setFooter({ text: `${guild.name} Guardian • 12-Hour Executive Report` })
+      .setFooter({ text: `${guild.name} Guardian • Live Executive Report` })
       .setTimestamp();
 
     return embed;

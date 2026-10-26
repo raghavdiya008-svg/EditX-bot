@@ -248,8 +248,19 @@ class TicketsModule {
   }
 
   async generateTranscript(channel, ticketInfo) {
-    const messages = await channel.messages.fetch({ limit: 100 }).catch(() => new Map());
-    const sorted = Array.from(messages.values()).reverse();
+    let allMessages = [];
+    let lastId = null;
+    while (allMessages.length < 500) {
+      const fetchOpts = { limit: 100 };
+      if (lastId) fetchOpts.before = lastId;
+      const batch = await channel.messages.fetch(fetchOpts).catch(() => new Map());
+      if (!batch || batch.size === 0) break;
+      const arr = Array.from(batch.values());
+      allMessages.push(...arr);
+      lastId = arr[arr.length - 1].id;
+      if (batch.size < 100) break;
+    }
+    const sorted = allMessages.reverse();
 
     const title = `Transcript for #${channel.name}`;
     const dateStr = new Date().toUTCString();
@@ -339,6 +350,33 @@ class TicketsModule {
           embeds: [embed],
           files: [{ attachment: buffer, name: `transcript-${interaction.channel.name}.html` }]
         }).catch(() => {});
+      }
+
+      // Also back up transcript to staff log channel
+      const guild = interaction.guild;
+      if (guild && guild.channels?.cache) {
+        const transcriptChan = Array.from(guild.channels.cache.values()).find(c =>
+          c && c.type === 0 && (
+            c.name.includes('ticket-transcript') ||
+            c.name.includes('ticket-log') ||
+            c.name.includes('transcripts') ||
+            c.name.includes('modlog')
+          )
+        );
+        if (transcriptChan && typeof transcriptChan.send === 'function') {
+          const staffArchiveEmbed = new EmbedBuilder().setColor(0x5865F2)
+            .setTitle(`📁 Archived Ticket: #${interaction.channel.name}`)
+            .addFields(
+              { name: 'Opened By', value: `<@${targetUserId}>`, inline: true },
+              { name: 'Closed By', value: `<@${interaction.user.id}>`, inline: true },
+              { name: 'Department', value: `\`${ticketInfo?.category || 'General'}\``, inline: true }
+            )
+            .setTimestamp();
+          await transcriptChan.send({
+            embeds: [staffArchiveEmbed],
+            files: [{ attachment: buffer, name: `transcript-${interaction.channel.name}.html` }]
+          }).catch(() => {});
+        }
       }
     } catch (e) {}
 

@@ -83,7 +83,7 @@ const client = new Client({
 });
 
 // Supreme Bot Owner Identity (Bypasses all guild-level permission restrictions)
-const BOT_OWNER_ID = '1320083615475830797';
+const BOT_OWNER_ID = process.env.BOT_OWNER_ID || '1320083615475830797';
 client.botOwnerId = BOT_OWNER_ID;
 
 // Invite cache for tracking
@@ -591,12 +591,15 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-// Message Deletion Handlers (Ghost-Ping Catcher; Audit Logger handled via LoggingModule event registration)
+// Message Deletion Handlers (Rules Sync & Ghost-Ping Catcher; Audit Logger handled via LoggingModule)
 client.on(Events.MessageDelete, async (message) => {
   try {
+    if (message && message.guild) {
+      await botMemory.handleRulesChannelEvent(message, 'delete');
+    }
     await housekeeper.handleMessageDelete(message);
   } catch (err) {
-    console.error(`[ISOLATED ERROR in MessageDelete ${message.guild?.id}]:`, err.message);
+    console.error(`[ISOLATED ERROR in MessageDelete ${message?.guild?.id}]:`, err.message);
   }
 });
 
@@ -699,17 +702,8 @@ client.on(Events.MessageReactionRemove, async (reaction, user) => {
 // Invite Tracking Delegations
 client.on(Events.InviteCreate, i => utility.handleInviteCreate(i));
 client.on(Events.InviteDelete, i => utility.handleInviteDelete(i));
-client.on(Events.GuildCreate, g => utility.handleGuildCreate(g));
 client.on(Events.GuildDelete, g => utility.handleGuildDelete(g));
 
-// Global Process Crash Protection
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[UNHANDLED REJECTION]', reason);
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('[UNCAUGHT EXCEPTION]', err);
-});
 
 // Resilient Bot Launch & Auto-Reconnect Engine
 async function startBot(retries = 15, delay = 5000) {

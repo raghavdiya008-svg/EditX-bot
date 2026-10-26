@@ -260,7 +260,7 @@ class ModerationModule {
         await interaction.deferReply();
         const target = options.getUser('target');
         const reason = options.getString('reason') || 'No reason provided';
-        const targetMember = await guild.members.fetch(target.id).catch(() => null);
+        const targetMember = (guild.members?.cache?.get(target.id)) || (await guild.members.fetch(target.id).catch(() => null));
 
         if (!targetMember) return interaction.editReply('❌ Member not found in server.');
         if (!targetMember.kickable) return interaction.editReply('❌ I lack permissions or target has a higher role.');
@@ -419,12 +419,27 @@ class ModerationModule {
         warns.push({ caseId: modCase.id, reason, by: interaction.user.id, timestamp: Date.now() });
         this.db.set(key, warns);
 
-        // Check Automated Warning Punishments
+        // Check Automated Warning Punishments & Mandatory 7+ Observation Quarantine
         let autoPunishText = '';
+
+        if (warns.length >= 7) {
+          const targetMember = await guild.members.fetch(target.id).catch(() => null);
+          if (targetMember) {
+            const qRes = await this.quarantineMember(guild, targetMember, 'Accumulated ' + warns.length + ' warning strikes (Mandatory 7+ Warning Observation Policy)', {
+              type: 'EXCESSIVE_WARNINGS',
+              moderator: interaction.user,
+              warnCount: warns.length
+            });
+            if (qRes.success) {
+              autoPunishText = '\n🚨 **OBSERVATION & QUARANTINE TRIGGERED:** User reached **' + warns.length + ' warnings**! All roles stripped and placed under quarantine observation. Must appeal and receive Staff/Owner approval to be released.';
+            }
+          }
+        }
+
         const punishments = config.warnPunishments || {};
         const action = punishments[warns.length];
 
-        if (action) {
+        if (action && warns.length < 7) {
           const targetMember = await guild.members.fetch(target.id).catch(() => null);
           if (targetMember) {
             try {
@@ -682,59 +697,46 @@ class ModerationModule {
         const targetUser = options.getUser('target');
         const reason = options.getString('reason') || 'Violation of server rules';
 
-        if (!config.quarantineRole) {
-          return interaction.editReply('❌ No quarantine/jail role configured. Run `/setup-quarantine` first.');
-        }
-
         const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
         if (!targetMember) return interaction.editReply('❌ Member not found in this server.');
-        if (!targetMember.manageable) return interaction.editReply('❌ I cannot jail this member (their highest role is above mine).');
+        if (targetMember.manageable === false) return interaction.editReply('❌ I cannot jail this member (their highest role is above mine).');
 
-        // Save old roles before stripping
-        const oldRoles = targetMember.roles.cache.filter(r => r.id !== guild.id && r.id !== config.quarantineRole).map(r => r.id);
-        this.db.set(`jail_roles_${guild.id}_${targetUser.id}`, oldRoles);
+        const qRes = await this.quarantineMember(guild, targetMember, reason, {
+          type: 'MANUAL',
+          moderator: interaction.user
+        });
 
-        try {
-          await targetMember.roles.set([config.quarantineRole], `Jailed by ${interaction.user.tag}: ${reason}`);
-          const modCase = this.createCase(guild.id, 'JAIL', targetUser, interaction.user, reason);
-
-          const embed = new EmbedBuilder().setColor(0xE74C3C)
-            .setTitle('🚨 Member Jailed / Quarantined')
-            .setDescription(`**Target:** <@${targetUser.id}> (${targetUser.tag})\n**Moderator:** <@${interaction.user.id}>\n**Reason:** ${reason}\n**Case:** #${modCase.id}\n**Roles Stripped:** ${oldRoles.length}`)
-            .setTimestamp();
-
-          targetMember.send(`⚠️ You have been placed in quarantine/jail in **${guild.name}** for: **${reason}**. All roles have been restricted.`).catch(() => {});
-          return interaction.editReply({ embeds: [embed] });
-        } catch (err) {
-          return interaction.editReply(`❌ Failed to jail member: ${err.message}`);
+        if (!qRes.success) {
+          return interaction.editReply('❌ ' + (qRes.error || 'Failed to quarantine member.'));
         }
+
+        const embed = new EmbedBuilder().setColor(0xE74C3C)
+          .setTitle('🚨 Member Placed in Quarantine / Observation')
+          .setDescription('**Target:** <@' + targetUser.id + '> (' + targetUser.tag + ')\n**Moderator:** <@' + interaction.user.id + '>\n**Reason:** ' + reason + '\n**Case:** #' + qRes.caseId + '\n**Status:** Quarantined pending Staff/Owner Appeal Approval')
+          .setTimestamp();
+
+        return interaction.editReply({ embeds: [embed] });
       }
 
       case 'unjail': {
         await interaction.deferReply();
         const targetUser = options.getUser('target');
-        const reason = options.getString('reason') || 'Jail sentence completed / Appeal approved';
+        const reason = options.getString('reason') || 'Appeal approved by staff/owner';
 
         const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
         if (!targetMember) return interaction.editReply('❌ Member not found in this server.');
 
-        const savedRoles = this.db.get(`jail_roles_${guild.id}_${targetUser.id}`) || [];
-        this.db.delete(`jail_roles_${guild.id}_${targetUser.id}`);
-
-        try {
-          await targetMember.roles.set(savedRoles, `Unjailed by ${interaction.user.tag}: ${reason}`).catch(() => {});
-          const modCase = this.createCase(guild.id, 'UNJAIL', targetUser, interaction.user, reason);
-
-          const embed = new EmbedBuilder().setColor(0x2ECC71)
-            .setTitle('🔓 Member Unjailed / Restored')
-            .setDescription(`**Target:** <@${targetUser.id}> (${targetUser.tag})\n**Moderator:** <@${interaction.user.id}>\n**Reason:** ${reason}\n**Case:** #${modCase.id}\n**Roles Restored:** ${savedRoles.length}`)
-            .setTimestamp();
-
-          targetMember.send(`✅ You have been released from quarantine in **${guild.name}**. Your previous server roles have been restored.`).catch(() => {});
-          return interaction.editReply({ embeds: [embed] });
-        } catch (err) {
-          return interaction.editReply(`❌ Failed to unjail member: ${err.message}`);
+        const relRes = await this.releaseQuarantine(guild, targetMember, interaction.user, reason);
+        if (!relRes.success) {
+          return interaction.editReply('❌ ' + (relRes.error || 'Failed to release member.'));
         }
+
+        const embed = new EmbedBuilder().setColor(0x2ECC71)
+          .setTitle('🔓 Member Released from Quarantine')
+          .setDescription('**Target:** <@' + targetUser.id + '> (' + targetUser.tag + ')\n**Moderator:** <@' + interaction.user.id + '>\n**Reason:** ' + reason + '\n**Case:** #' + relRes.caseId + '\n**Roles Restored:** ' + relRes.restoredRolesCount)
+          .setTimestamp();
+
+        return interaction.editReply({ embeds: [embed] });
       }
 
       case 'modhistory': {
@@ -1593,9 +1595,365 @@ class ModerationModule {
     } catch (err) {}
   }
 
+  async resolveObservationRole(guild, config = {}) {
+    if (!guild || !guild.roles?.cache) return null;
+
+    // 1. Check configured observation role (Strictly avoid Wick's role 1546811342369984652)
+    const configuredId = config.observationRoleId || config.observationRole;
+    if (configuredId && configuredId !== '1546811342369984652') {
+      const r = guild.roles.cache.get(configuredId);
+      if (r) return r;
+    }
+
+    // 2. Search for dedicated observation role (Excluding Wick's Quarantine role)
+    const rolesList = Array.from(guild.roles.cache.values());
+    const existing = rolesList.find(r =>
+      r.id !== '1546811342369984652' &&
+      r.name.toLowerCase() !== 'quarantine' && (
+        r.name.toLowerCase().includes('under observation') ||
+        r.name.toLowerCase().includes('observation') ||
+        r.name.toLowerCase().includes('editx restricted')
+      )
+    );
+    if (existing) return existing;
+
+    // 3. Auto-create dedicated EditX Observation role if missing and permissions allow
+    try {
+      const botMember = guild.members.me;
+      if (botMember && botMember.permissions?.has(PermissionFlagsBits.ManageRoles) && typeof guild.roles.create === 'function') {
+        const createdRole = await guild.roles.create({
+          name: '⚠️・Under Observation',
+          color: 0xF59E0B,
+          permissions: [],
+          reason: 'EditX Dedicated Observation & Appeal Role (Independent from Wick)'
+        });
+        config.observationRoleId = createdRole.id;
+        this.db.set(guild.id, config);
+        return createdRole;
+      }
+    } catch (e) {
+      console.warn('[OBSERVATION ROLE AUTO-CREATE WARNING]', e.message);
+    }
+
+    // Fallback: Return any role named Observation or first matching
+    return rolesList.find(r => r.id !== '1546811342369984652' && r.name.toLowerCase().includes('observ')) || null;
+  }
+
+  async quarantineMember(guild, targetMember, reason, options = {}) {
+    if (!guild || !targetMember) return { error: 'Invalid guild or target member.' };
+
+    // Server Owner and Supreme Bot Owner are completely immune
+    if (targetMember.id === guild.ownerId || targetMember.id === '1320083615475830797') {
+      return { error: 'Cannot quarantine the Server Owner or Supreme Bot Owner.' };
+    }
+
+    const config = this.db.get(guild.id) || {};
+    const qRole = await this.resolveObservationRole(guild, config);
+    if (!qRole) {
+      return { error: 'No Quarantine role found in this server. Run /setup-quarantine or create a role named "Quarantine".' };
+    }
+
+    // Save existing non-managed roles
+    const rCache = targetMember.roles?.cache;
+    const oldRoles = rCache ? Array.from(rCache.values())
+      .filter(r => r.id !== guild.id && r.id !== qRole.id && !r.managed)
+      .map(r => r.id) : [];
+
+    const jailKey = 'jail_roles_' + guild.id + '_' + targetMember.id;
+    const qKey = 'quarantine_' + guild.id + '_' + targetMember.id;
+
+    // Only set jail_roles if not already populated to preserve original state across rejoins
+    const existingSaved = this.db.get(jailKey);
+    if (!existingSaved || existingSaved.length === 0) {
+      if (oldRoles.length > 0) this.db.set(jailKey, oldRoles);
+    }
+
+    this.db.set(qKey, {
+      active: true,
+      userId: targetMember.id,
+      userTag: targetMember.user?.tag || targetMember.user?.username,
+      reason,
+      type: options.type || 'EXCESSIVE_WARNINGS',
+      pendingAction: options.pendingAction || null,
+      warnCount: options.warnCount || 0,
+      timestamp: Date.now(),
+      moderatorId: options.moderator?.id || this.client.user.id
+    });
+
+    // Strip roles & assign Quarantine role
+    try {
+      if (typeof targetMember.roles?.set === 'function') {
+        await targetMember.roles.set([qRole.id], 'Quarantine: ' + reason).catch(async () => {
+          if (oldRoles.length > 0 && typeof targetMember.roles?.remove === 'function') {
+            await targetMember.roles.remove(oldRoles).catch(() => {});
+          }
+          if (typeof targetMember.roles?.add === 'function') {
+            await targetMember.roles.add(qRole.id).catch(() => {});
+          }
+        });
+      }
+    } catch (err) {
+      console.error('[QUARANTINE ROLES ERROR]', err.message);
+    }
+
+    const modCase = this.createCase(guild.id, 'QUARANTINE', targetMember.user, options.moderator || this.client.user, reason);
+
+    // Notify User with appeal instructions
+    if (typeof targetMember.send === 'function') {
+      targetMember.send({
+        content: '⚠️ **You have been placed under Observation & Quarantine in ' + guild.name + '**\n' +
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+          '▸ **Reason:** ' + reason + '\n' +
+          '▸ **Status:** Under Quarantine Observation / Appeal Required\n' +
+          '▸ **Notice:** You cannot access public chat channels. You must submit an appeal to Staff or the Server Owner. **Leaving and rejoining the server will NOT clear this quarantine.**\n' +
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+      }).catch(() => {});
+    }
+
+    // Dispatch incident card with 1-click appeal approval buttons to staff
+    await this.dispatchQuarantineIncidentCard(guild, targetMember, reason, modCase.id, options);
+
+    return {
+      success: true,
+      caseId: modCase.id,
+      message: 'Placed ' + (targetMember.user?.username || targetMember.id) + ' into Quarantine under observation.'
+    };
+  }
+
+  async releaseQuarantine(guild, targetMember, approvedBy, note = 'Appeal approved by staff/owner') {
+    if (!guild || !targetMember) return { error: 'Invalid guild or target member.' };
+
+    const qKey = 'quarantine_' + guild.id + '_' + targetMember.id;
+    const jailKey = 'jail_roles_' + guild.id + '_' + targetMember.id;
+
+    const savedRoles = this.db.get(jailKey) || [];
+
+    // Clear quarantine records from database
+    this.db.delete(qKey);
+    this.db.delete(jailKey);
+
+    const config = this.db.get(guild.id) || {};
+    const qRole = await this.resolveObservationRole(guild, config);
+
+    if (qRole && targetMember.roles?.cache?.has(qRole.id) && typeof targetMember.roles?.remove === 'function') {
+      await targetMember.roles.remove(qRole.id, 'Released from quarantine by ' + (approvedBy.tag || approvedBy.username)).catch(() => {});
+    }
+
+    if (savedRoles.length > 0 && typeof targetMember.roles?.add === 'function') {
+      if (Array.isArray(savedRoles)) {
+        for (const rId of savedRoles) {
+          await targetMember.roles.add(rId, 'Restoring original roles upon quarantine release').catch(() => {});
+        }
+      } else {
+        await targetMember.roles.add(savedRoles, 'Restoring original roles upon quarantine release').catch(() => {});
+      }
+    }
+
+    const modCase = this.createCase(guild.id, 'UNQUARANTINE', targetMember.user, approvedBy, note);
+
+    if (typeof targetMember.send === 'function') {
+      targetMember.send({
+        content: '✅ **Your appeal was APPROVED in ' + guild.name + '!**\nYour quarantine has been lifted, and your previous server roles have been restored.'
+      }).catch(() => {});
+    }
+
+    return {
+      success: true,
+      caseId: modCase.id,
+      restoredRolesCount: savedRoles.length,
+      message: 'Released ' + (targetMember.user?.username || targetMember.id) + ' from quarantine. Restored ' + savedRoles.length + ' role(s).'
+    };
+  }
+
+  async dispatchQuarantineIncidentCard(guild, targetMember, reason, caseId, options = {}) {
+    const config = this.db.get(guild.id) || {};
+    let alertChan = null;
+
+    if (config.alertChannel) alertChan = guild.channels?.cache?.get(config.alertChannel);
+    if (!alertChan && config.logChannelId) alertChan = guild.channels?.cache?.get(config.logChannelId);
+    if (!alertChan && config.modLogChannelId) alertChan = guild.channels?.cache?.get(config.modLogChannelId);
+    if (!alertChan && guild.channels?.cache) {
+      alertChan = Array.from(guild.channels.cache.values()).find(c =>
+        c.type === ChannelType.GuildText && (
+          c.name.includes('mod-logs') ||
+          c.name.includes('modlogs') ||
+          c.name.includes('quarantine-appeals') ||
+          c.name.includes('appeals') ||
+          c.name.includes('alerts') ||
+          c.name.includes('staff')
+        )
+      );
+    }
+    if (!alertChan) alertChan = guild.systemChannel;
+
+    if (!alertChan || typeof alertChan.send !== 'function') return;
+
+    const actionType = options.pendingAction === 'BAN' ? '🔨 Pending Ban Review' :
+      options.pendingAction === 'KICK' ? '👢 Pending Kick Review' :
+      '⚠️ 7+ Warning Strikes Observation';
+
+    const embed = new EmbedBuilder()
+      .setColor(0xE74C3C)
+      .setTitle('🚨・MEMBER QUARANTINED // OBSERVATION & APPEAL REQUIRED')
+      .setThumbnail(targetMember.user?.displayAvatarURL?.({ dynamic: true }) || null)
+      .setDescription(
+        'A member has been restricted and quarantined under the **Observation & Appeal Policy**.\n' +
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '▸ 👤 **Offender**: <@' + targetMember.id + '> (`' + (targetMember.user?.tag || targetMember.user?.username) + '` • ID: `' + targetMember.id + '`)\n' +
+        '▸ 📋 **Trigger**: `' + actionType + '`\n' +
+        '▸ 📝 **Reason**: ' + reason + '\n' +
+        '▸ 🔒 **Status**: **Quarantined (All public roles revoked)**\n' +
+        '▸ 🛡️ **Anti-Bypass Guard**: **ARMED** (Leaving & rejoining server is strictly blocked)\n' +
+        '▸ 📁 **Audit Case**: **#' + caseId + '**\n' +
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '**Staff Decision Actions:**\n' +
+        'Review their appeal or infraction history below and choose an action:'
+      )
+      .setFooter({ text: guild.name + ' Quarantine Sentinel • Requires Staff/Owner Decision' })
+      .setTimestamp();
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('btn_q_approve_' + targetMember.id)
+        .setLabel('Approve Appeal & Release')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('btn_q_kick_' + targetMember.id)
+        .setLabel('Confirm Kick')
+        .setEmoji('👢')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('btn_q_ban_' + targetMember.id)
+        .setLabel('Confirm Final Ban')
+        .setEmoji('🔨')
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    await alertChan.send({ embeds: [embed], components: [row] }).catch(() => {});
+  }
+
+  async handleInteraction(interaction) {
+    if (!interaction.isButton()) return false;
+    const cid = interaction.customId;
+    if (!cid.startsWith('btn_q_')) return false;
+
+    // Staff/Admin Permission Check
+    const member = interaction.member;
+    const isOwner = interaction.user.id === interaction.guild.ownerId || interaction.user.id === '1320083615475830797';
+    const isStaff = member?.permissions?.has(PermissionFlagsBits.ManageGuild) ||
+      member?.permissions?.has(PermissionFlagsBits.Administrator) ||
+      member?.permissions?.has(PermissionFlagsBits.BanMembers) ||
+      member?.permissions?.has(PermissionFlagsBits.ModerateMembers);
+
+    if (!isOwner && !isStaff) {
+      await interaction.reply({ content: '❌ Only Staff or the Server Owner can decide quarantine appeals.', ephemeral: true }).catch(() => {});
+      return true;
+    }
+
+    await interaction.deferUpdate().catch(() => {});
+
+    const parts = cid.split('_');
+    const action = parts[2]; // 'approve', 'kick', 'ban'
+    const targetUserId = parts.slice(3).join('_');
+
+    const targetMember = await interaction.guild.members.fetch(targetUserId).catch(() => null);
+    let resultMessage = '';
+
+    if (action === 'approve') {
+      if (targetMember) {
+        const res = await this.releaseQuarantine(interaction.guild, targetMember, interaction.user, 'Quarantine appeal approved by staff');
+        resultMessage = '✅ **Appeal Approved & Member Released by <@' + interaction.user.id + '>** (' + (res.restoredRolesCount || 0) + ' role(s) restored).';
+      } else {
+        this.db.delete('quarantine_' + interaction.guild.id + '_' + targetUserId);
+        this.db.delete('jail_roles_' + interaction.guild.id + '_' + targetUserId);
+        resultMessage = '✅ **Quarantine record cleared by <@' + interaction.user.id + '>** (User is not currently in server).';
+      }
+    } else if (action === 'ban') {
+      try {
+        if (targetMember && targetMember.bannable) {
+          await targetMember.ban({ reason: 'Final Ban confirmed after quarantine observation by ' + interaction.user.tag });
+        } else {
+          await interaction.guild.bans.create(targetUserId, { reason: 'Final Ban confirmed after quarantine observation by ' + interaction.user.tag });
+        }
+        this.db.delete('quarantine_' + interaction.guild.id + '_' + targetUserId);
+        this.db.delete('jail_roles_' + interaction.guild.id + '_' + targetUserId);
+        this.createCase(interaction.guild.id, 'BAN', targetMember?.user || { id: targetUserId }, interaction.user, 'Final ban executed after quarantine observation');
+        resultMessage = '🔨 **Final Ban Executed by <@' + interaction.user.id + '>**';
+      } catch (err) {
+        resultMessage = '❌ **Ban failed:** ' + err.message;
+      }
+    } else if (action === 'kick') {
+      try {
+        if (targetMember && targetMember.kickable) {
+          await targetMember.kick('Final Kick confirmed after quarantine observation by ' + interaction.user.tag);
+        }
+        this.db.delete('quarantine_' + interaction.guild.id + '_' + targetUserId);
+        this.db.delete('jail_roles_' + interaction.guild.id + '_' + targetUserId);
+        this.createCase(interaction.guild.id, 'KICK', targetMember?.user || { id: targetUserId }, interaction.user, 'Final kick executed after quarantine observation');
+        resultMessage = '👢 **Final Kick Executed by <@' + interaction.user.id + '>**';
+      } catch (err) {
+        resultMessage = '❌ **Kick failed:** ' + err.message;
+      }
+    }
+
+    const oldEmbed = interaction.message.embeds[0];
+    if (oldEmbed) {
+      const newEmbed = EmbedBuilder.from(oldEmbed)
+        .setColor(action === 'approve' ? 0x2ECC71 : 0xED4245)
+        .addFields({
+          name: '⚖️ Staff Decision Log',
+          value: resultMessage,
+          inline: false
+        });
+      await interaction.editReply({ embeds: [newEmbed], components: [] }).catch(() => {});
+    }
+
+    return true;
+  }
+
   async handleJoin(member) {
+    // 1. Anti-Bypass Quarantine Enforcement: Leaving and rejoining does NOT bypass quarantine
+    const qKey = 'quarantine_' + member.guild.id + '_' + member.id;
+    const qData = this.db.get(qKey);
+
+    if (qData && qData.active) {
+      console.log('[QUARANTINE PERSISTENCE] Quarantined member ' + (member.user.tag || member.id) + ' rejoined. Re-applying quarantine role.');
+      const config = this.db.get(member.guild.id) || {};
+      const qRole = await this.resolveObservationRole(member.guild, config);
+
+      if (qRole) {
+        try {
+          if (typeof member.roles?.set === 'function') {
+            await member.roles.set([qRole.id], 'Quarantine Anti-Bypass: Re-applying quarantine on rejoin').catch(() => {});
+          } else if (typeof member.roles?.add === 'function') {
+            await member.roles.add(qRole.id, 'Quarantine Anti-Bypass: Re-applying quarantine on rejoin').catch(() => {});
+          }
+        } catch (e) {}
+      }
+
+      if (typeof member.send === 'function') {
+        member.send('⚠️ You are currently under quarantine in **' + member.guild.name + '**.\nLeaving and rejoining the server does **not** bypass your quarantine. You must submit an appeal and await Staff or Owner approval.').catch(() => {});
+      }
+
+      let alertChan = null;
+      if (config.alertChannel) alertChan = member.guild.channels?.cache?.get(config.alertChannel);
+      if (!alertChan && member.guild.channels?.cache) {
+        alertChan = Array.from(member.guild.channels.cache.values()).find(c =>
+          c.type === ChannelType.GuildText && (c.name.includes('mod-logs') || c.name.includes('alerts') || c.name.includes('staff'))
+        );
+      }
+      if (!alertChan) alertChan = member.guild.systemChannel;
+
+      if (alertChan && typeof alertChan.send === 'function') {
+        alertChan.send('🚨 **Quarantine Bypass Attempt Intercepted:** Quarantined user <@' + member.id + '> (`' + (member.user.tag || member.user.username) + '`) rejoined the server. All access was automatically revoked and Quarantine re-applied.').catch(() => {});
+      }
+
+      return true; // Quarantined: signal to suppress normal auto-roles and welcome greeting
+    }
+
     // Anti-Nuke, Bot-Add Blocker, and Join Raid Gates yielded exclusively to Wick Bot
-    return;
+    return false;
   }
 
   // Anti-Nuke & Audit Listeners yielded exclusively to Wick Bot

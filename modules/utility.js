@@ -1177,8 +1177,9 @@ class UtilityModule {
       const stats = this.utilDb.get(`stats_${guild.id}`);
       if (stats && stats.channelId) {
         const chan = guild.channels.cache.get(stats.channelId);
-        if (chan) {
-          chan.setName(`Members: ${guild.memberCount.toLocaleString()}`).catch(() => {});
+        const newName = `Members: ${guild.memberCount.toLocaleString()}`;
+        if (chan && chan.name !== newName) {
+          chan.setName(newName).catch(() => {});
         }
       }
 
@@ -1187,14 +1188,16 @@ class UtilityModule {
       if (decorStats) {
         if (decorStats.memberChannelId) {
           const mChan = guild.channels.cache.get(decorStats.memberChannelId);
-          if (mChan) {
-            mChan.setName(`👥・Members: ${guild.memberCount.toLocaleString()}`).catch(() => {});
+          const newMName = `👥・Members: ${guild.memberCount.toLocaleString()}`;
+          if (mChan && mChan.name !== newMName) {
+            mChan.setName(newMName).catch(() => {});
           }
         }
         if (decorStats.boostChannelId) {
           const bChan = guild.channels.cache.get(decorStats.boostChannelId);
-          if (bChan) {
-            bChan.setName(`🚀・Boost Level: ${guild.premiumTier || 0} (${guild.premiumSubscriptionCount || 0})`).catch(() => {});
+          const newBName = `🚀・Boost Level: ${guild.premiumTier || 0} (${guild.premiumSubscriptionCount || 0})`;
+          if (bChan && bChan.name !== newBName) {
+            bChan.setName(newBName).catch(() => {});
           }
         }
       }
