@@ -159,6 +159,19 @@ class UtilityModule {
         .addSubcommand(s => s.setName('test').setDescription('Trigger a test bump alert immediately'))
         .addSubcommand(s => s.setName('disable').setDescription('Disable automated bump reminders'))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+        .setDMPermission(false),
+
+      new SlashCommandBuilder().setName('goal').setDescription('Set, track, and monitor community goals and autonomous server milestones')
+        .addSubcommand(s => s.setName('view').setDescription('View current community goals, progress bars, and server milestones'))
+        .addSubcommand(s => s.setName('set').setDescription('Set a new target goal for the server')
+          .addStringOption(o => o.setName('type').setDescription('Goal category').setRequired(true)
+            .addChoices(
+              { name: '👥 Member Target', value: 'members' },
+              { name: '✨ Custom Milestone', value: 'custom' }
+            ))
+          .addIntegerOption(o => o.setName('target').setDescription('Target count (e.g. 500 members)').setRequired(true).setMinValue(1))
+          .addStringOption(o => o.setName('title').setDescription('Goal title or reward description').setRequired(true)))
+        .addSubcommand(s => s.setName('clear').setDescription('Clear active server goals'))
         .setDMPermission(false)
     ];
   }
@@ -1036,6 +1049,102 @@ class UtilityModule {
 
         await targetChannel.send({ content: `🔔 ${roleMention} **Bump Reminder Alert!**`, embeds: [testEmbed] }).catch(() => {});
         return interaction.reply({ content: `✅ Test bump alert dispatched to <#${targetChannel.id}>.`, ephemeral: true });
+      }
+    }
+
+    if (commandName === 'goal') {
+      const sub = options.getSubcommand();
+      const goalKey = `goal_${guild.id}`;
+
+      if (sub === 'clear') {
+        const canManage = user.id === '1320083615475830797' ||
+          user.id === guild.ownerId ||
+          Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild));
+        if (!canManage) {
+          return interaction.reply({ content: '❌ Manage Server permission is required to clear server goals.', ephemeral: true });
+        }
+        this.utilDb.delete(goalKey);
+        return interaction.reply({ content: '✅ Active community goals have been cleared.', ephemeral: true });
+      }
+
+      if (sub === 'set') {
+        const canManage = user.id === '1320083615475830797' ||
+          user.id === guild.ownerId ||
+          Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild));
+        if (!canManage) {
+          return interaction.reply({ content: '❌ Manage Server permission is required to configure server goals.', ephemeral: true });
+        }
+
+        const type = options.getString('type');
+        const target = options.getInteger('target');
+        const title = options.getString('title');
+
+        const goalData = {
+          type,
+          target,
+          title,
+          createdAt: Date.now(),
+          setBy: user.id
+        };
+        this.utilDb.set(goalKey, goalData);
+
+        const current = type === 'members' ? (guild.memberCount || 1) : 0;
+        const pct = Math.min(100, Math.round((current / target) * 100));
+        const filled = Math.max(0, Math.min(14, Math.round((pct / 100) * 14)));
+        const bar = '█'.repeat(filled) + '░'.repeat(14 - filled);
+
+        const embed = new EmbedBuilder()
+          .setColor(0x6366F1)
+          .setTitle(`🎯 New Server Goal Configured • ${guild.name}`)
+          .setDescription(`**${title}**\n\n` +
+            `📊 **Current Progress:** \`${current} / ${target}\` (\`${pct}%\`)\n` +
+            `\`[${bar}]\`\n\n` +
+            `🏆 **Milestone Category:** ${type === 'members' ? '👥 Member Count Milestone' : '✨ Custom Community Perk'}\n` +
+            `👤 **Configured By:** <@${user.id}>\n\n` +
+            `*Track anytime using \`/goal view\`!*`)
+          .setFooter({ text: 'EditX Community Milestones & Autonomous Goal Engine' })
+          .setTimestamp();
+
+        return interaction.reply({ embeds: [embed] });
+      }
+
+      if (sub === 'view') {
+        let goalData = this.utilDb.get(goalKey);
+        if (!goalData) {
+          const currentCount = guild.memberCount || 1;
+          const nextTarget = Math.ceil((currentCount + 10) / 50) * 50;
+          goalData = {
+            type: 'members',
+            target: nextTarget,
+            title: `Reach ${nextTarget} Community Members!`,
+            isDefault: true
+          };
+        }
+
+        const current = goalData.type === 'members' ? (guild.memberCount || 1) : 0;
+        const target = goalData.target || 1;
+        const pct = Math.min(100, Math.max(0, Math.round((current / target) * 100)));
+        const filled = Math.max(0, Math.min(16, Math.round((pct / 100) * 16)));
+        const bar = '█'.repeat(filled) + '░'.repeat(16 - filled);
+
+        const remaining = Math.max(0, target - current);
+
+        const embed = new EmbedBuilder()
+          .setColor(pct >= 100 ? 0x10B981 : 0x6366F1)
+          .setTitle(`🎯 ${guild.name} Active Community Goal`)
+          .setDescription(
+            `### ${goalData.title}\n\n` +
+            `**Progress:** \`${current} / ${target}\` (\`${pct}%\`)\n` +
+            `\`[${bar}]\`\n\n` +
+            `▸ **Category:** ${goalData.type === 'members' ? '👥 Member Community Target' : '✨ Custom Server Milestone'}\n` +
+            `▸ **Remaining to Milestone:** \`${remaining}\` ${goalData.type === 'members' ? 'members' : 'steps'}\n` +
+            `▸ **Status:** ${pct >= 100 ? '🎉 **GOAL COMPLETED!**' : '⚡ **Actively In Progress**'}\n\n` +
+            `*Staff can update this goal anytime using \`/goal set\`.*`
+          )
+          .setFooter({ text: `${guild.name} • EditX Autonomous Goal Tracker` })
+          .setTimestamp();
+
+        return interaction.reply({ embeds: [embed] });
       }
     }
 

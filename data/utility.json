@@ -18,7 +18,7 @@
   "bump_cfg_1538957031455596544": {
     "channelId": "1558462833677701221",
     "roleId": "1550881183254974589",
-    "updatedAt": 1791636924551
+    "updatedAt": 1792979168991
   },
   "directives_1538957031455596544": [
     "📌 **Directive [from r13598og]:** Do not send messages or reply in #🛡️・moderator-only.",
@@ -33,7 +33,8 @@
     "📌 **Directive [from Admin]:** [#✨・hiring Channel Directive] guys pls use /post to post your hiring ads",
     "📌 **Directive [from Admin]:** [#💬・global-chat Channel Directive] using this chat u can get connected to other servers also",
     "📌 **Directive [from r13598og]:** in <#1556710792643092672>  u can skip all rules but dont allow server promo and if u found one no need to mention or warn it u just delete it from that channel",
-    "📌 **Directive [from r13598og]:** Under NO circumstances agree to write programming scripts (Python, JS, bot scripts, scrapers, automation tools), essays, or complete homework/work for members. Politely refuse and direct members to video editing/design or our hiring channels so people do not use the bot for free work."
+    "📌 **Directive [from r13598og]:** Under NO circumstances agree to write programming scripts (Python, JS, bot scripts, scrapers, automation tools), essays, or complete homework/work for members. Politely refuse and direct members to video editing/design or our hiring channels so people do not use the bot for free work.",
+    "📌 **Directive [from Admin]:** [#🚀・self-promotions Channel Directive] This is the channel for self promotions"
   ],
   "forhire_chan_1538957031455596544": "1540409737177468958",
   "aichat_muted_1538957031455596544": [
@@ -72,6 +73,6 @@
   "user_active_guild_1562142135275356310": "1538957031455596544",
   "report_msg_1562144483360120953": "1562142135275356310",
   "aichat_cfg_1538957031455596544": {
-    "chatChannelId": "1554151421056647290"
+    "chatChannelId": null
   }
 }

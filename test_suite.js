@@ -3628,6 +3628,66 @@ async function runTests() {
     assert.strictEqual(db.security.get(`quarantine_${mockGuild.id}_${offenderUser.id}`), null, 'Quarantine record deleted after button approval');
   });
 
+  // 47. COMMUNITY GOALS & MILESTONES (/goal view, /goal set, /goal clear)
+  await test('47. Community Goals & Milestones (/goal view, /goal set, /goal clear)', async () => {
+    const util = new UtilityModule(mockClient, db);
+
+    // 1. Test /goal view default (when no custom goal set)
+    let viewReply = null;
+    await util.handleCommand({
+      commandName: 'goal',
+      options: { getSubcommand: () => 'view' },
+      guild: mockGuild,
+      user: mockUser,
+      reply: async (payload) => { viewReply = payload; }
+    });
+    assert.ok(viewReply?.embeds?.[0], 'Must return default community goal embed');
+    assert.ok(viewReply.embeds[0].data.title.includes('Active Community Goal'));
+
+    // 2. Test /goal set (staff creates a 500 member goal)
+    let setReply = null;
+    const staffUser = { id: 'staff_1' };
+    await util.handleCommand({
+      commandName: 'goal',
+      options: {
+        getSubcommand: () => 'set',
+        getString: (name) => name === 'type' ? 'members' : name === 'title' ? 'Reach 500 Editors!' : null,
+        getInteger: (name) => name === 'target' ? 500 : null
+      },
+      guild: mockGuild,
+      user: staffUser,
+      member: { permissions: { has: () => true } },
+      reply: async (payload) => { setReply = payload; }
+    });
+    assert.ok(setReply?.embeds?.[0], 'Must confirm new goal configured');
+    assert.ok(setReply.embeds[0].data.description.includes('Reach 500 Editors!'));
+
+    // 3. Test /goal view after custom goal set
+    let activeGoalReply = null;
+    await util.handleCommand({
+      commandName: 'goal',
+      options: { getSubcommand: () => 'view' },
+      guild: mockGuild,
+      user: mockUser,
+      reply: async (payload) => { activeGoalReply = payload; }
+    });
+    assert.ok(activeGoalReply.embeds[0].data.description.includes('500'));
+    assert.ok(activeGoalReply.embeds[0].data.description.includes('█'), 'Progress bar must be rendered');
+
+    // 4. Test /goal clear (staff clears the goal)
+    let clearReply = null;
+    await util.handleCommand({
+      commandName: 'goal',
+      options: { getSubcommand: () => 'clear' },
+      guild: mockGuild,
+      user: staffUser,
+      member: { permissions: { has: () => true } },
+      reply: async (payload) => { clearReply = payload; }
+    });
+    assert.ok(clearReply.content.includes('cleared'));
+    assert.strictEqual(db.utility.get(`goal_${mockGuild.id}`), null, 'Goal must be removed from database');
+  });
+
   console.log('\n====================================================');
   console.log(`🏁 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('====================================================\n');
