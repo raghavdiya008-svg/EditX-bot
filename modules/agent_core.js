@@ -27,7 +27,7 @@ class AgentCore {
     this.groqKey = process.env.GROQ_API_KEY;
 
     this.gemini = this.geminiKey ? new GoogleGenAI({ apiKey: this.geminiKey }) : null;
-    this.botOwnerId = process.env.BOT_OWNER_ID || '1320083615475830797';
+    this.botOwnerId = this.client?.botOwnerId || process.env.BOT_OWNER_ID || '';
   }
 
   setBotMemory(botMemory) {
@@ -999,12 +999,13 @@ OPERATIONAL PRINCIPLES:
       }
     }
 
-    // 2. Fallback Engine: Google Gemini 3.6 Flash (with Function Calling Tools)
+    // 2. Fallback Engine: Google Gemini Flash (with Function Calling Tools)
     if (this.gemini) {
       try {
         const geminiTools = this.getGeminiTools();
+        const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
         const response = await this.gemini.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: geminiModel,
           contents: `${systemPrompt}\n\nUser Message:\n${prompt}`,
           config: {
             temperature: 0.4,
@@ -1019,7 +1020,7 @@ OPERATIONAL PRINCIPLES:
 
           // Second round to synthesize natural reply
           const followUpRes = await this.gemini.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: geminiModel,
             contents: `${systemPrompt}\n\nUser asked: "${prompt}"\nYou called tool "${call.name}" with args: ${JSON.stringify(call.args)}\nTool result was: ${JSON.stringify(toolResult)}\nProvide a natural, conversational response confirming what happened or presenting the results directly to the user.`
           });
 

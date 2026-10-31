@@ -17,18 +17,18 @@ class TagsModule {
           .addStringOption(o => o.setName('name').setDescription('Tag name/trigger').setRequired(true))
           .addStringOption(o => o.setName('content').setDescription('Tag content (supports TagScript variables)').setRequired(true)))
         .addSubcommand(s => s.setName('get').setDescription('Display a tag')
-          .addStringOption(o => o.setName('name').setDescription('Tag name or alias').setRequired(true))
+          .addStringOption(o => o.setName('name').setDescription('Tag name or alias').setAutocomplete(true).setRequired(true))
           .addUserOption(o => o.setName('target').setDescription('Target user for {target} variables')))
         .addSubcommand(s => s.setName('delete').setDescription('Delete an existing tag')
-          .addStringOption(o => o.setName('name').setDescription('Tag name to delete').setRequired(true)))
+          .addStringOption(o => o.setName('name').setDescription('Tag name to delete').setAutocomplete(true).setRequired(true)))
         .addSubcommand(s => s.setName('list').setDescription('List all server tags'))
         .addSubcommand(s => s.setName('raw').setDescription('View raw unformatted markdown of a tag')
-          .addStringOption(o => o.setName('name').setDescription('Tag name').setRequired(true)))
+          .addStringOption(o => o.setName('name').setDescription('Tag name').setAutocomplete(true).setRequired(true)))
         .addSubcommand(s => s.setName('info').setDescription('View creator, creation date, and stats for a tag')
-          .addStringOption(o => o.setName('name').setDescription('Tag name').setRequired(true)))
+          .addStringOption(o => o.setName('name').setDescription('Tag name').setAutocomplete(true).setRequired(true)))
         .addSubcommand(s => s.setName('alias').setDescription('Create an alias for an existing tag')
           .addStringOption(o => o.setName('alias_name').setDescription('New alias shortcut name').setRequired(true))
-          .addStringOption(o => o.setName('original_name').setDescription('Target tag name to link to').setRequired(true)))
+          .addStringOption(o => o.setName('original_name').setDescription('Target tag name to link to').setAutocomplete(true).setRequired(true)))
         .setDMPermission(false),
 
       new SlashCommandBuilder().setName('autoresponder').setDescription('Automated message trigger keyword responses')
@@ -163,6 +163,23 @@ class TagsModule {
     parsed = parsed.replace(/\{date\}/gi, `<t:${Math.floor(Date.now() / 1000)}:d>`);
 
     return parsed;
+  }
+
+  async handleAutocomplete(interaction) {
+    if (interaction.commandName !== 'tag') return false;
+    const focused = interaction.options.getFocused(true);
+    if (focused.name === 'name' || focused.name === 'original_name') {
+      const tags = this.db.get(`tags_${interaction.guild?.id}`) || {};
+      const tagNames = Object.keys(tags);
+      const query = (focused.value || '').toLowerCase();
+      const filtered = tagNames
+        .filter(t => t.toLowerCase().includes(query))
+        .slice(0, 25)
+        .map(t => ({ name: t, value: t }));
+      await interaction.respond(filtered).catch(() => {});
+      return true;
+    }
+    return false;
   }
 
   async handleCommand(interaction) {

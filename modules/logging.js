@@ -72,6 +72,24 @@ class LoggingModule {
     return channel;
   }
 
+  async logError(guild, context, error) {
+    try {
+      console.error(`[ERROR LOG - ${context}]:`, error);
+      if (!guild) return;
+      const channel = await this.getLogChannel(guild, 'all');
+      if (!channel || typeof channel.send !== 'function') return;
+
+      const embed = new EmbedBuilder()
+        .setColor(0xED4245)
+        .setTitle('🚨・System Exception Log')
+        .setDescription(`An error was caught in **${context}**:\n\`\`\`js\n${String(error?.stack || error?.message || error).slice(0, 1500)}\n\`\`\``)
+        .setFooter({ text: 'Omni Error Logger' })
+        .setTimestamp();
+
+      await channel.send({ embeds: [embed] }).catch(() => {});
+    } catch (e) {}
+  }
+
   registerEvents() {
     // 1. Message Delete & Update
     this.client.on(Events.MessageDelete, this.handleMessageDelete.bind(this));

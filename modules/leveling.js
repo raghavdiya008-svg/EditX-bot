@@ -8,7 +8,14 @@ class LevelingModule {
     this.rolesModule = rolesModule;
 
     // Track Voice XP every 3 minutes
-    setInterval(() => this.processVoiceXP(), 3 * 60 * 1000);
+    this._voiceXpInterval = setInterval(() => this.processVoiceXP(), 3 * 60 * 1000);
+  }
+
+  destroy() {
+    if (this._voiceXpInterval) {
+      clearInterval(this._voiceXpInterval);
+      this._voiceXpInterval = null;
+    }
   }
 
   setRolesModule(rolesModule) {
@@ -161,8 +168,111 @@ class LevelingModule {
     return false;
   }
 
+  async renderLevelUpCard(user, newLevel) {
+    const width = 720;
+    const height = 220;
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    // Background gradient: Deep obsidian with vibrant emerald glow
+    const bgGrad = ctx.createLinearGradient(0, 0, width, height);
+    bgGrad.addColorStop(0, '#090B10');
+    bgGrad.addColorStop(0.5, '#0E131F');
+    bgGrad.addColorStop(1, '#090B10');
+    ctx.fillStyle = bgGrad;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, width, height, 16);
+    ctx.fill();
+
+    // Subtle Glowing Accent Border
+    ctx.strokeStyle = '#2ECC71';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.roundRect(2, 2, width - 4, height - 4, 15);
+    ctx.stroke();
+
+    // Avatar
+    const avatarX = 40;
+    const avatarY = 50;
+    const avatarSize = 120;
+    try {
+      const avatarUrl = user?.displayAvatarURL ? user.displayAvatarURL({ extension: 'png', size: 256 }) : null;
+      if (avatarUrl) {
+        const avatarImg = await loadImage(avatarUrl);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(avatarImg, avatarX, avatarY, avatarSize, avatarSize);
+        ctx.restore();
+
+        // Avatar ring
+        ctx.strokeStyle = '#2ECC71';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    } catch (e) {
+      ctx.fillStyle = '#2ECC71';
+      ctx.beginPath();
+      ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Header Text: "LEVEL UP!"
+    ctx.fillStyle = '#2ECC71';
+    ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    ctx.fillText('⚡ LEVEL UP ACCOMPLISHED', 185, 75);
+
+    // User Display Name
+    const username = (user?.username || user?.tag || 'Member').slice(0, 20);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 28px "Segoe UI", sans-serif';
+    ctx.fillText(username, 185, 115);
+
+    // Subtitle
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = '16px "Segoe UI", sans-serif';
+    ctx.fillText(`Advanced to Level ${newLevel}! Keep active in chat & voice.`, 185, 148);
+
+    // Right Badge: Level Emblem
+    const badgeX = 600;
+    const badgeY = 110;
+    const badgeR = 48;
+
+    ctx.fillStyle = 'rgba(46, 204, 113, 0.15)';
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, badgeR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#2ECC71';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, badgeR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = '#2ECC71';
+    ctx.font = 'bold 12px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('LEVEL', badgeX, badgeY - 10);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 32px "Segoe UI", sans-serif';
+    ctx.fillText(`${newLevel}`, badgeX, badgeY + 24);
+    ctx.textAlign = 'start';
+
+    return canvas.toBuffer('image/png');
+  }
+
   async sendLevelUpAnnouncement(member, newLevel, currentChannel) {
-    const config = this.db.get(`config_${member.guild.id}`) || { mode: 'current', channelId: null, message: null };
+    if (!member && !currentChannel) return;
+    const guild = member?.guild || currentChannel?.guild;
+    const guildId = guild?.id;
+    if (!guildId) return;
+
+    const config = this.db.get(`config_${guildId}`) || { mode: 'current', channelId: null, message: null };
     if (config.mode === 'disabled') return;
 
     // Suppress announcements in moderator-only and confidential staff channels
@@ -173,29 +283,44 @@ class LevelingModule {
       return;
     }
 
-    const defaultMsg = `🎉 Congrats <@${member.id}>, you advanced to **Level ${newLevel}**!`;
+    const memberId = member?.id || member?.user?.id;
+    if (!memberId) return;
+
+    const defaultMsg = `🎉 Congrats <@${memberId}>, you advanced to **Level ${newLevel}**!`;
     const text = config.message
-      ? config.message.replace('{user}', `<@${member.id}>`).replace('{level}', newLevel)
+      ? config.message.replace('{user}', `<@${memberId}>`).replace('{level}', newLevel)
       : defaultMsg;
 
     const embed = new EmbedBuilder().setColor(0x57F287)
-      .setAuthor({ name: 'Level Up!', iconURL: member.user.displayAvatarURL() })
+      .setAuthor({ name: 'Level Up!', iconURL: member?.user?.displayAvatarURL ? member.user.displayAvatarURL() : (member?.displayAvatarURL ? member.displayAvatarURL() : null) })
       .setDescription(text);
 
-    if (config.mode === 'dm') {
-      await member.send({ embeds: [embed] }).catch(() => {
-        if (currentChannel) currentChannel.send({ embeds: [embed] }).catch(() => {});
+    let files = [];
+    try {
+      const cardBuffer = await this.renderLevelUpCard(member.user || member, newLevel);
+      if (cardBuffer) {
+        const attachment = new AttachmentBuilder(cardBuffer, { name: 'levelup.png' });
+        embed.setImage('attachment://levelup.png');
+        files.push(attachment);
+      }
+    } catch (e) {}
+
+    const payload = { embeds: [embed], files };
+
+    if (config.mode === 'dm' && typeof member?.send === 'function') {
+      await member.send(payload).catch(() => {
+        if (currentChannel) currentChannel.send(payload).catch(() => {});
       });
-    } else if (config.mode === 'channel' && config.channelId) {
-      const targetChan = member.guild.channels.cache.get(config.channelId) || await member.guild.channels.fetch(config.channelId).catch(() => null);
+    } else if (config.mode === 'channel' && config.channelId && guild?.channels) {
+      const targetChan = guild.channels.cache?.get(config.channelId) || await guild.channels.fetch?.(config.channelId).catch(() => null);
       if (targetChan) {
-        await targetChan.send({ content: `<@${member.id}>`, embeds: [embed] }).catch(() => {});
+        await targetChan.send({ content: `<@${memberId}>`, ...payload }).catch(() => {});
       } else if (currentChannel) {
-        await currentChannel.send({ embeds: [embed] }).catch(() => {});
+        await currentChannel.send(payload).catch(() => {});
       }
     } else {
       if (currentChannel) {
-        await currentChannel.send({ embeds: [embed] }).catch(() => {});
+        await currentChannel.send(payload).catch(() => {});
       }
     }
   }
@@ -362,7 +487,9 @@ class LevelingModule {
     }
 
     if (leveledUp) {
-      this.sendLevelUpAnnouncement(message.member, data.level, message.channel);
+      this.sendLevelUpAnnouncement(message.member, data.level, message.channel).catch(err => {
+        console.error('[LEVEL UP ERROR]', err);
+      });
 
       if (this.rolesModule && message.member) {
         this.rolesModule.checkLevelUpRewards(message.member, data.level);

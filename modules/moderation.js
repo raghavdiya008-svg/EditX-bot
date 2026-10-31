@@ -16,8 +16,29 @@ class ModerationModule {
     this.INVITE_REGEX = /(discord\.(gg|io|me|li|com\/invite)|discordapp\.com\/invite|dsc\.gg)\/[a-zA-Z0-9]+/i;
     this.URL_REGEX = /https?:\/\/[^\s]+/i;
 
-    setInterval(() => this.cleanCaches(), 10 * 60 * 1000);
-    setInterval(() => this.checkTempBans(), 60 * 1000);
+    this._cleanInterval = setInterval(() => this.cleanCaches(), 10 * 60 * 1000);
+    this._tempBansInterval = setInterval(() => this.checkTempBans(), 60 * 1000);
+  }
+
+  destroy() {
+    if (this._cleanInterval) {
+      clearInterval(this._cleanInterval);
+      this._cleanInterval = null;
+    }
+    if (this._tempBansInterval) {
+      clearInterval(this._tempBansInterval);
+      this._tempBansInterval = null;
+    }
+  }
+
+  isBotOwner(userId) {
+    if (!userId) return false;
+    if (typeof this.client?.isOwner === 'function') return this.client.isOwner(userId);
+    return userId === (this.client?.botOwnerId || process.env.BOT_OWNER_ID);
+  }
+
+  getBotOwnerId() {
+    return this.client?.botOwnerId || process.env.BOT_OWNER_ID || '';
   }
 
   cleanCaches() {
@@ -42,6 +63,27 @@ class ModerationModule {
       if (valid.length === 0) this.heuristicJoinTracker.delete(key);
       else this.heuristicJoinTracker.set(key, valid);
     }
+  }
+
+getActiveWarnings(guildId, userId) {
+    const key = `warns_${guildId}_${userId}`;
+    const raw = this.db.get(key) || [];
+    const config = this.db.get(guildId) || {};
+    const expiryDays = config.warnExpiryDays !== undefined ? config.warnExpiryDays : 30;
+    if (expiryDays === 0) return raw;
+
+    const now = Date.now();
+    const expiryMs = expiryDays * 24 * 60 * 60 * 1000;
+    const active = raw.filter(w => {
+      if (w.expiresAt) return w.expiresAt > now;
+      if (w.timestamp) return (now - w.timestamp) < expiryMs;
+      return true;
+    });
+
+    if (active.length !== raw.length) {
+      this.db.set(key, active);
+    }
+    return active;
   }
 
   createCase(guildId, action, targetUser, moderatorUser, reason) {
@@ -141,10 +183,12 @@ class ModerationModule {
         .addSubcommand(s => s.setName('remove').setDescription('Remove punishment at threshold')
           .addIntegerOption(o => o.setName('threshold').setDescription('Number of warnings').setRequired(true)))
         .addSubcommand(s => s.setName('list').setDescription('List configured warning punishment thresholds'))
+        .addSubcommand(s => s.setName('expiry').setDescription('Configure days until warnings expire (0 for permanent)')
+          .addIntegerOption(o => o.setName('days').setDescription('Days until expiration (e.g. 30, 60, 90, 0)').setMinValue(0).setMaxValue(365).setRequired(true)))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator).setDMPermission(false),
 
       new SlashCommandBuilder().setName('case').setDescription('Lookup moderation case by ID')
-        .addIntegerOption(o => o.setName('id').setDescription('Case number').setRequired(true))
+        .addIntegerOption(o => o.setName('id').setDescription('Case number').setAutocomplete(true).setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).setDMPermission(false),
 
       new SlashCommandBuilder().setName('purge').setDescription('Bulk delete messages with advanced filters')
@@ -237,6 +281,25 @@ class ModerationModule {
           ))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).setDMPermission(false)
     ];
+  }
+
+  async handleAutocomplete(interaction) {
+    if (interaction.commandName !== 'case') return false;
+    const focused = interaction.options.getFocused(true);
+    if (focused.name === 'id') {
+      const cases = this.casesDb?.get(interaction.guild?.id) || [];
+      const query = String(focused.value || '').toLowerCase();
+      const filtered = cases
+        .filter(c => String(c.id).includes(query) || (c.userTag && c.userTag.toLowerCase().includes(query)))
+        .slice(0, 25)
+        .map(c => ({
+          name: `#${c.id} - ${(c.action || 'ACTION').toUpperCase()} (${c.userTag || c.userId || 'Unknown'})`,
+          value: Number(c.id)
+        }));
+      await interaction.respond(filtered).catch(() => {});
+      return true;
+    }
+    return false;
   }
 
   async handleCommand(interaction) {
@@ -750,7 +813,7 @@ class ModerationModule {
         }
         cases.sort((a, b) => b.timestamp - a.timestamp);
 
-        const warns = this.db.get(`warns_${guild.id}_${targetUser.id}`) || [];
+        const warns = this.getActiveWarnings(guild.id, targetUser.id);
         const notes = this.db.get(`notes_${guild.id}_${targetUser.id}`) || [];
 
         const embed = new EmbedBuilder().setColor(0x5865F2)
@@ -1080,7 +1143,7 @@ class ModerationModule {
       (message.channel.name && (message.channel.name.includes('do-not-type-here') || message.channel.name.includes('honeypot')));
 
     if (isTrapChannel) {
-      if (message.author.id === '1320083615475830797' || message.author.id === message.guild.ownerId || message.member?.permissions?.has(PermissionFlagsBits.Administrator)) {
+      if (this.isBotOwner(message.author.id) || message.author.id === message.guild.ownerId || message.member?.permissions?.has(PermissionFlagsBits.Administrator)) {
         return false;
       }
 
@@ -1227,7 +1290,7 @@ class ModerationModule {
 
     if (isTrapChannel) {
       const member = await message.guild.members.fetch(user.id).catch(() => null);
-      if (user.id === '1320083615475830797' || user.id === message.guild.ownerId || member?.permissions?.has(PermissionFlagsBits.Administrator)) return;
+      if (this.isBotOwner(user.id) || user.id === message.guild.ownerId || member?.permissions?.has(PermissionFlagsBits.Administrator)) return;
 
       try {
         await reaction.users.remove(user.id).catch(() => {});
@@ -1405,7 +1468,7 @@ class ModerationModule {
       member.permissions?.has?.(PermissionFlagsBits.ModerateMembers) ||
       (member.roles?.highest && member.roles.highest.position > 27) ||
       (message.author.id === message.guild.ownerId) ||
-      (message.author.id === '1320083615475830797')
+      this.isBotOwner(message.author.id)
     );
 
     if (isStaffOrAdmin) return false;
@@ -1643,7 +1706,7 @@ class ModerationModule {
     if (!guild || !targetMember) return { error: 'Invalid guild or target member.' };
 
     // Server Owner and Supreme Bot Owner are completely immune
-    if (targetMember.id === guild.ownerId || targetMember.id === '1320083615475830797') {
+    if (targetMember.id === guild.ownerId || this.isBotOwner(targetMember.id)) {
       return { error: 'Cannot quarantine the Server Owner or Supreme Bot Owner.' };
     }
 
@@ -1840,7 +1903,7 @@ class ModerationModule {
 
     // Staff/Admin Permission Check
     const member = interaction.member;
-    const isOwner = interaction.user.id === interaction.guild.ownerId || interaction.user.id === '1320083615475830797';
+    const isOwner = interaction.user.id === interaction.guild.ownerId || this.isBotOwner(interaction.user.id);
     const isStaff = member?.permissions?.has(PermissionFlagsBits.ManageGuild) ||
       member?.permissions?.has(PermissionFlagsBits.Administrator) ||
       member?.permissions?.has(PermissionFlagsBits.BanMembers) ||
@@ -1979,7 +2042,7 @@ class ModerationModule {
     if (!isCoOwner) return false;
 
     // Owner is immune
-    if (message.author.id === message.guild.ownerId || message.author.id === '1320083615475830797') return false;
+    if (message.author.id === message.guild.ownerId || this.isBotOwner(message.author.id)) return false;
 
     const content = (message.content || '').toLowerCase();
     
@@ -2071,7 +2134,7 @@ class ModerationModule {
     }
 
     // Alert server owner via DM
-    const owner = await this.client.users.fetch('1320083615475830797').catch(() => null);
+    const owner = await this.client.users.fetch(this.getBotOwnerId()).catch(() => null);
     if (owner) {
       await owner.send({
         content: `🚨 **Co-Owner Guardian Alert:** <@${message.author.id}> (${message.author.tag}) reached 5 strikes for sus/NSFW/promo messages in **${guild.name}**. The bot has stripped all their roles.`
@@ -2106,7 +2169,7 @@ class ModerationModule {
 
       const executor = entry.executor;
       if (!executor || executor.bot) return; // Ignore bots
-      if (executor.id === guild.ownerId || executor.id === '1320083615475830797') return; // Server owner immune
+      if (executor.id === guild.ownerId || this.isBotOwner(executor.id)) return; // Server owner immune
 
       // Check if executor is a Co-Owner
       const executorMember = await guild.members.fetch(executor.id).catch(() => null);
@@ -2156,7 +2219,7 @@ class ModerationModule {
           await alertChan.send({ content: '@everyone', embeds: [alertEmbed] }).catch(() => {});
         }
 
-        const owner = await this.client.users.fetch('1320083615475830797').catch(() => null);
+        const owner = await this.client.users.fetch(this.getBotOwnerId()).catch(() => null);
         if (owner) {
           await owner.send({
             content: `🚨 **CRITICAL SECURITY ALERT:** Co-Owner <@${executor.id}> (${executor.tag}) banned more than 1 person in **${guild.name}**. The bot has stripped all their roles and **kicked them from the server immediately**.`

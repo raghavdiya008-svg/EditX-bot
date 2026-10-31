@@ -11,13 +11,34 @@ class JSONDatabase {
     this.tmpPath = path.join(this.dataDir, `${name}.json.tmp`);
     this.data = {};
     this.saveTimeout = null;
+    this._writeLock = Promise.resolve();
 
     if (!fs.existsSync(this.dataDir)) {
       fs.mkdirSync(this.dataDir, { recursive: true });
     }
 
+    this.cleanStaleTmpFiles();
     this.load();
     instances.add(this);
+  }
+
+  cleanStaleTmpFiles() {
+    try {
+      if (!fs.existsSync(this.dataDir)) return;
+      const now = Date.now();
+      const files = fs.readdirSync(this.dataDir);
+      for (const f of files) {
+        if (f.startsWith(`${this.name}.`) && f.endsWith('.tmp')) {
+          const fullPath = path.join(this.dataDir, f);
+          try {
+            const stat = fs.statSync(fullPath);
+            if (now - stat.mtimeMs > 60000) {
+              fs.unlinkSync(fullPath);
+            }
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
   }
 
   load() {
@@ -27,10 +48,21 @@ class JSONDatabase {
         this.data = JSON.parse(fileContent);
       } catch (err) {
         console.error(`[DB ERROR] Corrupt or unreadable file ${this.path}, attempting recovery:`, err);
-        if (fs.existsSync(this.tmpPath)) {
+        const candidates = [];
+        if (fs.existsSync(this.tmpPath)) candidates.push(this.tmpPath);
+        try {
+          const files = fs.readdirSync(this.dataDir);
+          const tmpFiles = files
+            .filter(f => f.startsWith(`${this.name}.`) && f.endsWith('.tmp'))
+            .map(f => ({ name: f, path: path.join(this.dataDir, f), mtime: fs.statSync(path.join(this.dataDir, f)).mtimeMs }))
+            .sort((a, b) => b.mtime - a.mtime);
+          for (const item of tmpFiles) candidates.push(item.path);
+        } catch (e) {}
+
+        for (const candidate of candidates) {
           try {
-            this.data = JSON.parse(fs.readFileSync(this.tmpPath, 'utf-8'));
-            console.log(`[DB RECOVERY] Recovered data from ${this.tmpPath}`);
+            this.data = JSON.parse(fs.readFileSync(candidate, 'utf-8'));
+            console.log(`[DB RECOVERY] Recovered data from ${candidate}`);
             return;
           } catch (e) {}
         }
@@ -43,14 +75,15 @@ class JSONDatabase {
   }
 
   saveSync() {
+    const tmpPath = path.join(this.dataDir, `${this.name}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
     try {
       const content = JSON.stringify(this.data, null, 2);
-      fs.writeFileSync(this.tmpPath, content, 'utf-8');
+      fs.writeFileSync(tmpPath, content, 'utf-8');
       try {
-        fs.renameSync(this.tmpPath, this.path);
+        fs.renameSync(tmpPath, this.path);
       } catch (renameErr) {
         fs.writeFileSync(this.path, content, 'utf-8');
-        try { fs.unlinkSync(this.tmpPath); } catch (e) {}
+        try { fs.unlinkSync(tmpPath); } catch (e) {}
       }
     } catch (err) {
       console.error(`[DB ERROR] Synchronous save failed for ${this.path}:`, err);
@@ -59,20 +92,25 @@ class JSONDatabase {
 
   save() {
     if (this.saveTimeout) return;
-    this.saveTimeout = setTimeout(async () => {
+    this.saveTimeout = setTimeout(() => {
       this.saveTimeout = null;
-      try {
-        const content = JSON.stringify(this.data, null, 2);
-        await fs.promises.writeFile(this.tmpPath, content, 'utf-8');
+      this._writeLock = (this._writeLock || Promise.resolve()).then(async () => {
+        const tmpPath = path.join(this.dataDir, `${this.name}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
         try {
-          await fs.promises.rename(this.tmpPath, this.path);
-        } catch (renameErr) {
-          await fs.promises.writeFile(this.path, content, 'utf-8');
-          await fs.promises.unlink(this.tmpPath).catch(() => {});
+          const content = JSON.stringify(this.data, null, 2);
+          await fs.promises.writeFile(tmpPath, content, 'utf-8');
+          try {
+            await fs.promises.rename(tmpPath, this.path);
+          } catch (renameErr) {
+            await fs.promises.writeFile(this.path, content, 'utf-8');
+            await fs.promises.unlink(tmpPath).catch(() => {});
+          }
+        } catch (err) {
+          console.error(`[DB ERROR] Asynchronous save failed for ${this.path}:`, err);
         }
-      } catch (err) {
-        console.error(`[DB ERROR] Asynchronous save failed for ${this.path}:`, err);
-      }
+      }).catch(err => {
+        console.error(`[DB LOCK ERROR] Serialized write failed for ${this.path}:`, err);
+      });
     }, 800);
   }
 

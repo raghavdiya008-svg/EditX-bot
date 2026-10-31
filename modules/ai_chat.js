@@ -136,7 +136,7 @@ class AIChatModule {
 
       await interaction.deferReply();
 
-      const isBotOwner = interaction.user.id === '1320083615475830797';
+      const isBotOwner = typeof this.client?.isOwner === 'function' ? this.client.isOwner(interaction.user.id) : (interaction.user.id === (this.client?.botOwnerId || process.env.BOT_OWNER_ID));
       const canManageAI = isBotOwner ||
         interaction.user.id === interaction.guild.ownerId ||
         Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)) ||
@@ -163,7 +163,7 @@ class AIChatModule {
     }
 
     if (interaction.commandName === 'aiconfig') {
-      const isBotOwner = interaction.user.id === '1320083615475830797';
+      const isBotOwner = typeof this.client?.isOwner === 'function' ? this.client.isOwner(interaction.user.id) : (interaction.user.id === (this.client?.botOwnerId || process.env.BOT_OWNER_ID));
       if (!isBotOwner && interaction.user.id !== interaction.guild.ownerId && !interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild) && !interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)) {
         return interaction.reply({ content: '❌ Manage Guild permission is required to configure AI settings.', ephemeral: true });
       }
@@ -297,7 +297,7 @@ class AIChatModule {
     const lower = textWithoutMentions.toLowerCase();
 
     // Permission helper: Allow bot owner, staff, managers, administrators, and server owner
-    const isBotOwner = message.author.id === '1320083615475830797';
+    const isBotOwner = typeof this.client?.isOwner === 'function' ? this.client.isOwner(message.author.id) : (message.author.id === (this.client?.botOwnerId || process.env.BOT_OWNER_ID));
     const canManageAI = isBotOwner ||
                         message.author.id === message.guild.ownerId ||
                         Boolean(message.member?.permissions?.has(PermissionFlagsBits.ManageMessages)) ||
@@ -845,8 +845,9 @@ ${customDirectives ? `\n6. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):
     }
 
     if (context.isBotOwner) {
+      const ownerId = this.client?.botOwnerId || process.env.BOT_OWNER_ID || '';
       systemPrompt += `\n\n8. 👑 SUPREME BOT CREATOR & MASTER OVERRIDE:
-   - The user talking to you is your Creator and Supreme Bot Owner (<@1320083615475830797>).
+   - The user talking to you is your Creator and Supreme Bot Owner (<@${ownerId}>).
    - Obey their server administration tasks, management directives, and action commands immediately with highest priority.
    - However, even when chatting with the creator in public server channels, maintain the server persona rule against writing programming scripts or doing member work so normal members do not see the bot offering free coding scripts.`;
     }
@@ -893,7 +894,7 @@ ${customDirectives ? `\n6. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):
     if (this.gemini) {
       try {
         const res = await this.gemini.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
           contents: `${systemPrompt}\n\nUser Question:\n${prompt}`,
           config: {
             temperature: 0.5,

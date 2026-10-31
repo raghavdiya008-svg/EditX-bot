@@ -37,10 +37,17 @@ class HousekeeperModule {
     this.staffPingCooldowns = new Map();
 
     // Cleanup message tracking cache every 5 minutes
-    setInterval(() => this.cleanupMessageCache(), 5 * 60 * 1000);
+    this._cleanupInterval = setInterval(() => this.cleanupMessageCache(), 5 * 60 * 1000);
 
     // Note: Robotic unsolicited morning briefing timer decommissioned to prevent spam.
     // Briefings are now served on-demand via /copilot briefing or AI agent conversation.
+  }
+
+  destroy() {
+    if (this._cleanupInterval) {
+      clearInterval(this._cleanupInterval);
+      this._cleanupInterval = null;
+    }
   }
 
   cleanupMessageCache() {
@@ -199,7 +206,7 @@ If the issue strictly requires HUMAN AUTHORITY (like unbanning someone, payment 
     if (!replyText && this.ai) {
       try {
         const res = await this.ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
           contents: `${systemPrompt}\n\nUser Question:\n${cleanPrompt}`
         });
         replyText = res.text ? res.text.trim() : '';
@@ -326,7 +333,7 @@ Write a 2-sentence executive operational assessment for the server owner. Focus 
       if (!aiInsight && this.ai) {
         try {
           const res = await this.ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
             contents: prompt
           });
           if (res.text?.trim()) aiInsight = res.text.trim();
@@ -394,8 +401,8 @@ Write a 2-sentence executive operational assessment for the server owner. Focus 
     if (interaction.commandName !== 'copilot') return false;
 
     // Hardcoded Permission Security Validation
-    const BOT_OWNER_ID = '1320083615475830797';
-    const isStaff = interaction.user.id === BOT_OWNER_ID ||
+    const BOT_OWNER_ID = this.client?.botOwnerId || process.env.BOT_OWNER_ID;
+    const isStaff = (typeof this.client?.isOwner === 'function' ? this.client.isOwner(interaction.user.id) : interaction.user.id === BOT_OWNER_ID) ||
                     interaction.user.id === interaction.guild?.ownerId ||
                     Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) ||
                     Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
@@ -459,7 +466,7 @@ Write a 2-sentence executive operational assessment for the server owner. Focus 
           if (summary === 'Chat activity was normal and positive.' && this.ai) {
             try {
               const res = await this.ai.models.generateContent({
-                model: 'gemini-3.6-flash',
+                model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
                 contents: summarizePrompt
               });
               summary = res.text ? res.text.trim() : summary;
@@ -551,7 +558,7 @@ Include clean typography, clear bullet points, rules/details, and relevant emoji
       if (!drafted && this.ai) {
         try {
           const res = await this.ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
             contents: draftPrompt
           });
           drafted = res.text ? res.text.trim() : '';

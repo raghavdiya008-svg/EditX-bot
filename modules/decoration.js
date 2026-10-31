@@ -269,8 +269,8 @@ class DecorationModule {
   async handleCommand(interaction) {
     if (interaction.commandName !== 'decorate') return false;
 
-    const BOT_OWNER_ID = '1320083615475830797';
-    const isAuthorized = interaction.user?.id === BOT_OWNER_ID ||
+    const BOT_OWNER_ID = this.client?.botOwnerId || process.env.BOT_OWNER_ID;
+    const isAuthorized = (typeof this.client?.isOwner === 'function' ? this.client.isOwner(interaction.user?.id) : interaction.user?.id === BOT_OWNER_ID) ||
                          interaction.user?.id === interaction.guild?.ownerId ||
                          Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
 

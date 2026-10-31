@@ -35,7 +35,14 @@ class TranslatorModule {
     this.userCooldowns = new Map();
 
     // Periodically clean translation cache every 10 minutes
-    setInterval(() => this.cleanupCache(), 10 * 60 * 1000);
+    this._cleanupInterval = setInterval(() => this.cleanupCache(), 10 * 60 * 1000);
+  }
+
+  destroy() {
+    if (this._cleanupInterval) {
+      clearInterval(this._cleanupInterval);
+      this._cleanupInterval = null;
+    }
   }
 
   cleanupCache() {
@@ -225,7 +232,7 @@ ${cleanText}
 """`;
 
         const geminiRes = await this.ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
           contents: prompt,
           config: {
             responseMimeType: 'application/json',

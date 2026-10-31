@@ -3688,6 +3688,190 @@ async function runTests() {
     assert.strictEqual(db.utility.get(`goal_${mockGuild.id}`), null, 'Goal must be removed from database');
   });
 
+  // 48. DASHBOARD SECURITY - DASHBOARD_SECRET BEARER, HEADER & QUERY AUTHENTICATION GUARD
+  await test('48. Dashboard Security - DASHBOARD_SECRET Bearer, Header & Query Authentication Guard', async () => {
+    const DashboardModule = require('./modules/dashboard');
+    const mockClient = {
+      isReady: () => true,
+      user: { id: 'bot_id', tag: 'EditX#0799', displayAvatarURL: () => 'https://avatar' },
+      guilds: { cache: new Map() }
+    };
+    const mockDb = { config: new Map() };
+    const dash = new DashboardModule(mockClient, mockDb, null, { port: 3099 });
+
+    process.env.DASHBOARD_SECRET = 'top_secret_token_777';
+
+    const mockRes = () => {
+      let statusCode = 200;
+      let headers = {};
+      let body = '';
+      return {
+        writeHead: (code, h) => { statusCode = code; if (h) headers = h; },
+        setHeader: (k, v) => { headers[k] = v; },
+        write: (d) => { body += d; },
+        end: (d) => { if (d) body += d; },
+        getStatusCode: () => statusCode,
+        getBody: () => body
+      };
+    };
+
+    // 1. Unauthenticated mutation -> 401
+    const unauthRes = mockRes();
+    await dash.handleHttpRequest({
+      url: '/api/takeover/enable',
+      method: 'POST',
+      headers: {},
+      on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('{"channelId":"all"}')); if (ev === 'end') cb(); }
+    }, unauthRes);
+    assert.strictEqual(unauthRes.getStatusCode(), 401, 'Mutation without token must be rejected with 401');
+
+    // 2. Bad token -> 401
+    const badTokenRes = mockRes();
+    await dash.handleHttpRequest({
+      url: '/api/takeover/enable',
+      method: 'POST',
+      headers: { authorization: 'Bearer wrong_token' },
+      on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('{"channelId":"all"}')); if (ev === 'end') cb(); }
+    }, badTokenRes);
+    assert.strictEqual(badTokenRes.getStatusCode(), 401, 'Mutation with wrong token must be rejected with 401');
+
+    // 3. Valid Bearer Token -> 200
+    const bearerRes = mockRes();
+    await dash.handleHttpRequest({
+      url: '/api/takeover/enable',
+      method: 'POST',
+      headers: { authorization: 'Bearer top_secret_token_777' },
+      on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('{"channelId":"all"}')); if (ev === 'end') cb(); }
+    }, bearerRes);
+    assert.strictEqual(bearerRes.getStatusCode(), 200, 'Valid Bearer token must be accepted');
+
+    // 4. Valid x-dashboard-secret Header -> 200
+    const headerRes = mockRes();
+    await dash.handleHttpRequest({
+      url: '/api/takeover/release',
+      method: 'POST',
+      headers: { 'x-dashboard-secret': 'top_secret_token_777' },
+      on: (ev, cb) => { if (ev === 'end') cb(); }
+    }, headerRes);
+    assert.strictEqual(headerRes.getStatusCode(), 200, 'Valid x-dashboard-secret header must be accepted');
+
+    // 5. Valid Query Token -> 200
+    const queryRes = mockRes();
+    await dash.handleHttpRequest({
+      url: '/api/takeover/enable?token=top_secret_token_777',
+      method: 'POST',
+      headers: {},
+      on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('{"channelId":"all"}')); if (ev === 'end') cb(); }
+    }, queryRes);
+    assert.strictEqual(queryRes.getStatusCode(), 200, 'Valid ?token= parameter must be accepted');
+
+    delete process.env.DASHBOARD_SECRET;
+  });
+
+  // 49. BOT OWNER SOVEREIGNTY - DYNAMIC CLIENT.ISOWNER & MULTI-MODULE PERMISSION BYPASS
+  await test('49. Bot Owner Sovereignty - Dynamic client.isOwner & Multi-Module Permission Bypass', async () => {
+    const customOwnerId = 'custom_supreme_owner_101';
+    mockClient.botOwnerId = customOwnerId;
+    mockClient.isOwner = (userId) => {
+      if (!userId) return false;
+      return userId === mockClient.botOwnerId || userId === process.env.BOT_OWNER_ID || userId === '1320083615475830797';
+    };
+
+    // 1. Direct isOwner evaluations
+    assert.strictEqual(mockClient.isOwner(customOwnerId), true, 'Configured BOT_OWNER_ID must be recognized as owner');
+    assert.strictEqual(mockClient.isOwner('1320083615475830797'), true, 'Default master owner must be recognized as owner');
+    assert.strictEqual(mockClient.isOwner('regular_user_999'), false, 'Normal user must not be recognized as owner');
+
+    // 2. ModerationModule immunity check
+    const mod = new ModerationModule(mockClient, db);
+    assert.strictEqual(mod.isBotOwner(customOwnerId), true, 'ModerationModule must recognize dynamic owner');
+    assert.strictEqual(mod.isBotOwner('1320083615475830797'), true, 'ModerationModule must recognize fallback owner');
+    assert.strictEqual(mod.isBotOwner('regular_user_999'), false, 'ModerationModule must reject normal user');
+
+    // 3. Quarantine immunity check
+    const quarantineImmunity = await mod.quarantineMember(mockGuild, { id: customOwnerId });
+    assert.strictEqual(quarantineImmunity.error, 'Cannot quarantine the Server Owner or Supreme Bot Owner.');
+
+    // 4. UtilityModule goal management authorization
+    const util = new UtilityModule(mockClient, db);
+    assert.strictEqual(util.isOwner(customOwnerId), true, 'UtilityModule must recognize dynamic owner');
+  });
+
+  // 50. RESILIENT DATA PERSISTENCE - JSONDATABASE UNIQUE ATOMIC TEMP WRITE, RECOVERY & CLEANUP
+  await test('50. Resilient Data Persistence - JSONDatabase Unique Atomic Temp Write, Recovery & Cleanup', async () => {
+    const fs = require('fs');
+    const path = require('path');
+    const dbName = 'test_atomic_safety';
+    const dataDir = path.join(__dirname, 'data');
+    const dbPath = path.join(dataDir, `${dbName}.json`);
+
+    const atomicDb = new JSONDatabase(dbName);
+    atomicDb.set('key1', 'value1', true);
+    assert.strictEqual(atomicDb.get('key1'), 'value1');
+
+    // Verify file exists on disk
+    assert.ok(fs.existsSync(dbPath));
+
+    // Simulate corruption of main JSON file
+    fs.writeFileSync(dbPath, '{ corrupt json content ...', 'utf-8');
+
+    // Create a temporary candidate file from an interrupted atomic write
+    const tempCandidate = path.join(dataDir, `${dbName}.${Date.now()}.abc.tmp`);
+    fs.writeFileSync(tempCandidate, JSON.stringify({ key1: 'value_recovered_from_tmp' }), 'utf-8');
+
+    // Reload DB and verify recovery from candidate .tmp
+    atomicDb.load();
+    assert.strictEqual(atomicDb.get('key1'), 'value_recovered_from_tmp', 'Must recover data from candidate tmp file');
+
+    // Test stale tmp cleanup
+    const staleTmp = path.join(dataDir, `${dbName}.stale.1.tmp`);
+    fs.writeFileSync(staleTmp, '{}', 'utf-8');
+    // Set modified time to 2 minutes ago
+    const twoMinsAgo = new Date(Date.now() - 120000);
+    fs.utimesSync(staleTmp, twoMinsAgo, twoMinsAgo);
+
+    atomicDb.cleanStaleTmpFiles();
+    assert.strictEqual(fs.existsSync(staleTmp), false, 'Stale tmp files must be cleaned up');
+
+    // Clean up
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+    if (fs.existsSync(tempCandidate)) fs.unlinkSync(tempCandidate);
+  });
+
+  // 51. GIVEAWAY LIFECYCLE - CLIENT OFFLINE READINESS GUARD, START RECOVERY & MODULE TEARDOWN
+  await test('51. Giveaway Lifecycle - Client Offline Readiness Guard, Start Recovery & Module Teardown', async () => {
+    let clientReady = false;
+    const mockGwClient = {
+      isReady: () => clientReady,
+      channels: {
+        fetch: async () => null
+      }
+    };
+
+    const gwMod = new GiveawaysModule(mockGwClient, db);
+
+    // When client is offline, checkGiveaways must not run / mark giveaways prematurely ended
+    db.giveaways.set('gw_test_offline', {
+      messageId: 'test_offline',
+      channelId: 'chan_offline',
+      prize: 'Nitro',
+      endsAt: Date.now() - 5000,
+      ended: false,
+      entrants: []
+    });
+
+    await gwMod.checkGiveaways();
+    const stillPending = db.giveaways.get('gw_test_offline');
+    assert.strictEqual(stillPending.ended, false, 'Giveaway must not be concluded while Discord client is offline');
+
+    // Verify teardown cleanly destroys timer
+    assert.ok(gwMod.checkInterval, 'Interval must be running initially');
+    gwMod.destroy();
+    assert.strictEqual(gwMod.checkInterval, null, 'Interval must be null after destroy');
+
+    db.giveaways.delete('gw_test_offline');
+  });
+
   console.log('\n====================================================');
   console.log(`🏁 TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('====================================================\n');
@@ -3699,8 +3883,8 @@ async function runTests() {
   if (fs.existsSync(dataDir)) {
     const files = fs.readdirSync(dataDir);
     for (const f of files) {
-      if (f.startsWith('test_') && f.endsWith('.json')) {
-        fs.unlinkSync(path.join(dataDir, f));
+      if (f.startsWith('test_') && (f.endsWith('.json') || f.endsWith('.tmp'))) {
+        try { fs.unlinkSync(path.join(dataDir, f)); } catch (e) {}
       }
     }
   }

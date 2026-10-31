@@ -1,6 +1,6 @@
 /**
  * AI Moderation Engine for Omni Bot
- * Powered by Google Gemini API (gemini-3.6-flash)
+ * Powered by Google Gemini API (gemini-2.0-flash / gemini-1.5-flash)
  * 
  * Engineered specifically for Free Tier & Strict Rate Limits:
  * 1. Heuristic Pre-Filtering: 99% of normal chat messages bypass the API.
@@ -11,7 +11,7 @@
  */
 
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenAI, Type } = require('@google/genai');
 
 class AIModerationModule {
   constructor(client, db) {
@@ -53,7 +53,7 @@ class AIModerationModule {
     this.incidentJournal = [];
 
     // Clean caches every 10 minutes
-    setInterval(() => this.cleanCaches(), 10 * 60 * 1000);
+    this._cleanInterval = setInterval(() => this.cleanCaches(), 10 * 60 * 1000);
 
     // Heuristic Suspicion Triggers
     this.SCAM_PATTERNS = [
@@ -79,6 +79,20 @@ class AIModerationModule {
     for (const [userId, ts] of this.userCooldowns.entries()) {
       if (now - ts > 30000) {
         this.userCooldowns.delete(userId);
+      }
+    }
+    for (const [chanId, buffer] of this.channelContextBuffers.entries()) {
+      const lastMsg = buffer[buffer.length - 1];
+      if (!lastMsg || now - lastMsg.timestamp > 30 * 60 * 1000) {
+        this.channelContextBuffers.delete(chanId);
+      }
+    }
+    for (const [guildId, timestamps] of this.guildRequestTimestamps.entries()) {
+      const valid = timestamps.filter(t => now - t < 60000);
+      if (valid.length === 0) {
+        this.guildRequestTimestamps.delete(guildId);
+      } else {
+        this.guildRequestTimestamps.set(guildId, valid);
       }
     }
     this.incidentJournal = this.incidentJournal.filter(i => now - i.timestamp < 24 * 60 * 60 * 1000);
@@ -169,6 +183,13 @@ class AIModerationModule {
       ...entry,
       timestamp: Date.now()
     });
+  }
+
+  destroy() {
+    if (this._cleanInterval) {
+      clearInterval(this._cleanInterval);
+      this._cleanInterval = null;
+    }
   }
 
   getCommands() {
@@ -322,7 +343,8 @@ class AIModerationModule {
     this.trackMessageContext(message);
 
     // 2. Immediate Server Owner / Administrator / Bot Owner Immunity
-    if (message.author.id === '1320083615475830797' ||
+    const isOwner = typeof this.client?.isOwner === 'function' ? this.client.isOwner(message.author.id) : (message.author.id === (this.client?.botOwnerId || process.env.BOT_OWNER_ID));
+    if (isOwner ||
         message.author.id === message.guild.ownerId ||
         message.member.permissions?.has(PermissionFlagsBits.Administrator)) {
       return true;
@@ -498,10 +520,20 @@ Respond strictly in valid JSON format:
 
       try {
         const response = await this.ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
           contents: `${systemPrompt}\n\nContext: ${contextInfo}\nMessage to analyze:\n"""${text.slice(0, 1000)}"""`,
           config: {
             responseMimeType: 'application/json',
+            responseSchema: Type ? {
+              type: Type.OBJECT,
+              properties: {
+                flagged: { type: Type.BOOLEAN, description: 'Whether the message violates safety or server policies' },
+                category: { type: Type.STRING, description: 'Category: CLEAN, SCAM_PHISHING, SEVERE_TOXICITY, HARASSMENT, or RULE_VIOLATION' },
+                confidence: { type: Type.NUMBER, description: 'Confidence score between 0.0 and 1.0' },
+                reason: { type: Type.STRING, description: 'Brief explanation of verdict' }
+              },
+              required: ['flagged', 'category', 'confidence', 'reason']
+            } : undefined,
             temperature: 0.1
           }
         });
@@ -569,6 +601,7 @@ Respond strictly in valid JSON format:
         },
         body: JSON.stringify({
           model: 'qwen/qwen3.8-27b',
+          response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: `Context: ${contextInfo}\nMessage to analyze:\n"""${text.slice(0, 1000)}"""` }
@@ -740,7 +773,8 @@ Respond strictly in valid JSON format:
     if (!cid.startsWith('btn_mod_')) return false;
 
     // Staff authorization check
-    const isStaff = interaction.user.id === '1320083615475830797' ||
+    const isOwner = typeof this.client?.isOwner === 'function' ? this.client.isOwner(interaction.user.id) : (interaction.user.id === (this.client?.botOwnerId || process.env.BOT_OWNER_ID));
+    const isStaff = isOwner ||
                     interaction.user.id === interaction.guild?.ownerId ||
                     Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.ManageMessages)) ||
                     Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.ModerateMembers)) ||

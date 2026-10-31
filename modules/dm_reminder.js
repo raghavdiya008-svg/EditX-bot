@@ -617,8 +617,8 @@ class DMReminderModule {
     const { commandName, options, guild, user } = interaction;
 
     if (commandName === 'dmblast') {
-      const BOT_OWNER_ID = '1320083615475830797';
-      const isAuthorized = user?.id === BOT_OWNER_ID ||
+      const BOT_OWNER_ID = this.client?.botOwnerId || process.env.BOT_OWNER_ID;
+      const isAuthorized = (typeof this.client?.isOwner === 'function' ? this.client.isOwner(user?.id) : user?.id === BOT_OWNER_ID) ||
                            user?.id === guild?.ownerId ||
                            Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
 
@@ -1030,7 +1030,8 @@ class DMReminderModule {
     if (!isDmIntent) return false;
 
     // Authorization check: Staff, Moderator, Admin, Server Owner, or Bot Owner
-    const isAuthorized = message.author.id === '1320083615475830797' ||
+    const isBotOwner = typeof this.client?.isOwner === 'function' ? this.client.isOwner(message.author.id) : (message.author.id === (this.client?.botOwnerId || process.env.BOT_OWNER_ID));
+    const isAuthorized = isBotOwner ||
       message.author.id === message.guild?.ownerId ||
       Boolean(message.member?.permissions?.has?.(PermissionFlagsBits.Administrator)) ||
       Boolean(message.member?.permissions?.has?.(PermissionFlagsBits.ManageMessages)) ||

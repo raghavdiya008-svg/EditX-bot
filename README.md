@@ -70,11 +70,14 @@ An enterprise-grade, all-in-one Discord management, moderation, and community en
    ```
 
 3. **Configure environment variables:**
-   Copy `.env.example` to `.env` and fill in your Discord credentials:
+   Copy `.env.example` to `.env` and fill in your credentials:
    ```env
    DISCORD_TOKEN=your_token_here
    CLIENT_ID=your_client_id_here
    GUILD_ID=your_guild_id_here
+   BOT_OWNER_ID=your_discord_user_id_here
+   PORT=3005
+   DASHBOARD_SECRET=your_dashboard_secret_here
    GEMINI_API_KEY=your_gemini_api_key_here
    ```
 
@@ -83,7 +86,7 @@ An enterprise-grade, all-in-one Discord management, moderation, and community en
    node deploy_commands.js
    ```
 
-5. **Run Automated Test Suite (25 Tests):**
+5. **Run Automated Test Suite (51 Tests):**
    ```bash
    node test_suite.js
    ```

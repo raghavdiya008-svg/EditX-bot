@@ -20,10 +20,27 @@ class UtilityModule {
     this.vanityCache = new Map(); // guildId -> uses
 
     // Check reminders every 30 seconds
-    setInterval(() => this.checkReminders(), 30 * 1000);
+    this._remindersInterval = setInterval(() => this.checkReminders(), 30 * 1000);
 
     // Update server stats channels every 10 minutes
-    setInterval(() => this.updateServerStats(), 10 * 60 * 1000);
+    this._statsInterval = setInterval(() => this.updateServerStats(), 10 * 60 * 1000);
+  }
+
+  destroy() {
+    if (this._remindersInterval) {
+      clearInterval(this._remindersInterval);
+      this._remindersInterval = null;
+    }
+    if (this._statsInterval) {
+      clearInterval(this._statsInterval);
+      this._statsInterval = null;
+    }
+  }
+
+  isOwner(userId) {
+    if (!userId) return false;
+    if (typeof this.client?.isOwner === 'function') return this.client.isOwner(userId);
+    return userId === (this.client?.botOwnerId || process.env.BOT_OWNER_ID);
   }
 
   getCommands() {
@@ -1057,7 +1074,7 @@ class UtilityModule {
       const goalKey = `goal_${guild.id}`;
 
       if (sub === 'clear') {
-        const canManage = user.id === '1320083615475830797' ||
+        const canManage = this.isOwner(user.id) ||
           user.id === guild.ownerId ||
           Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild));
         if (!canManage) {
@@ -1068,7 +1085,7 @@ class UtilityModule {
       }
 
       if (sub === 'set') {
-        const canManage = user.id === '1320083615475830797' ||
+        const canManage = this.isOwner(user.id) ||
           user.id === guild.ownerId ||
           Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild));
         if (!canManage) {

@@ -5,7 +5,20 @@ class GiveawaysModule {
     this.client = client;
     this.db = db.giveaways;
 
-    setInterval(() => this.checkGiveaways(), 15 * 1000);
+    // Immediately check if client is ready, or schedule check upon ClientReady
+    if (this.client?.isReady?.()) {
+      this.checkGiveaways();
+    } else if (this.client?.once) {
+      this.client.once('ready', () => this.checkGiveaways());
+    }
+    this.checkInterval = setInterval(() => this.checkGiveaways(), 15 * 1000);
+  }
+
+  destroy() {
+    if (this.checkInterval) {
+      clearInterval(this.checkInterval);
+      this.checkInterval = null;
+    }
   }
 
   getCommands() {
@@ -172,6 +185,7 @@ class GiveawaysModule {
 
   async checkGiveaways() {
     try {
+      if (this.client && typeof this.client.isReady === 'function' && !this.client.isReady()) return;
       if (!this.db || typeof this.db.entries !== 'function') return;
       const now = Date.now();
       for (const [key, gw] of this.db.entries()) {

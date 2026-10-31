@@ -7,7 +7,8 @@
     "start": "node omni_bot.js",
     "dashboard": "node scripts/dashboard.js",
     "deploy": "node deploy_commands.js",
-    "test": "node test_suite.js"
+    "test": "node test_suite.js",
+    "start:pm2": "pm2 start ecosystem.config.js"
   },
   "keywords": [],
   "author": "",

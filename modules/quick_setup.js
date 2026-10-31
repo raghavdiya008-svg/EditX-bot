@@ -37,56 +37,7 @@ class QuickSetupModule {
     ];
   }
 
-  async handleCommand(interaction) {
-    const { guild, channel } = interaction;
-    const BOT_OWNER_ID = '1320083615475830797';
-    const isAuthorized = interaction.user?.id === BOT_OWNER_ID ||
-                         interaction.user?.id === guild?.ownerId ||
-                         Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
-
-    if (interaction.commandName === 'autopilot') {
-      if (!isAuthorized) {
-        return interaction.reply({ content: '❌ Administrator permission is required to run Auto-Pilot.', ephemeral: true });
-      }
-
-      await interaction.deferReply();
-      const results = await this.runAutoPilot(guild, true);
-
-      const embed = new EmbedBuilder()
-        .setColor(0x2ECC71)
-        .setTitle('⚡・EditX 100% Autonomous Auto-Pilot Online')
-        .setDescription(
-          `Your server is operating on **complete autonomous auto-pilot**. The bot actively manages member arrivals, roles, logging, hiring, support, security, and AI directives without requiring manual staff intervention.\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `👋 **1. Welcomer & Canvas Cards**\n▸ ${results.welcomer}\n\n` +
-          `🏷️ **2. Auto-Role On Arrival**\n▸ ${results.autorole}\n\n` +
-          `📋 **3. Mod & Server Audit Logs**\n▸ ${results.logging}\n\n` +
-          `💼 **4. Hiring & Freelance Desk**\n▸ ${results.hiring}\n\n` +
-          `🎫 **5. Support Ticket Dispatch**\n▸ ${results.tickets}\n\n` +
-          `🚀 **6. Bump Reminders**\n▸ ${results.bump}\n\n` +
-          `🍯 **7. Honeypot Anti-Raid Shield**\n▸ ${results.honeypot}\n\n` +
-          `🧠 **8. State Vault & Custom Rules**\n▸ ${results.memory}\n\n` +
-          `🌐 **9. Server Knowledge & AI Context**\n▸ ${results.serverScan}\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-          `✨ *Sit back and relax! EditX is managing member arrivals, roles, tickets, hiring threads, and security 24/7.*`
-        )
-        .setFooter({ text: `${guild.name} • 100% Autonomous Auto-Pilot` })
-        .setTimestamp();
-
-      return interaction.editReply({ embeds: [embed] });
-    }
-
-    if (interaction.commandName !== 'setup') return false;
-
-    const sub = interaction.options.getSubcommand();
-
-    if (!isAuthorized) {
-      return interaction.reply({ content: '❌ Administrator permission is required to configure server systems.', ephemeral: true });
-    }
-
-    // 1. ONE-CLICK AUTOMATED SETUP
-    if (sub === 'quick') {
-      await interaction.deferReply();
+  async executeQuickSetup(guild, channel) {
 
       const results = {
         welcomer: null,
@@ -340,6 +291,60 @@ class QuickSetupModule {
         .setFooter({ text: `${guild.name} • 1-Click System Engine` })
         .setTimestamp();
 
+    return dashboardEmbed;
+  }
+
+  async handleCommand(interaction) {
+    const { guild, channel } = interaction;
+    const BOT_OWNER_ID = this.client?.botOwnerId || process.env.BOT_OWNER_ID;
+    const isAuthorized = (typeof this.client?.isOwner === 'function' ? this.client.isOwner(interaction.user?.id) : interaction.user?.id === BOT_OWNER_ID) ||
+                         interaction.user?.id === guild?.ownerId ||
+                         Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
+
+    if (interaction.commandName === 'autopilot') {
+      if (!isAuthorized) {
+        return interaction.reply({ content: '❌ Administrator permission is required to run Auto-Pilot.', ephemeral: true });
+      }
+
+      await interaction.deferReply();
+      const results = await this.runAutoPilot(guild, true);
+
+      const embed = new EmbedBuilder()
+        .setColor(0x2ECC71)
+        .setTitle('⚡・EditX 100% Autonomous Auto-Pilot Online')
+        .setDescription(
+          `Your server is operating on **complete autonomous auto-pilot**. The bot actively manages member arrivals, roles, logging, hiring, support, security, and AI directives without requiring manual staff intervention.\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `👋 **1. Welcomer & Canvas Cards**\n▸ ${results.welcomer}\n\n` +
+          `🏷️ **2. Auto-Role On Arrival**\n▸ ${results.autorole}\n\n` +
+          `📋 **3. Mod & Server Audit Logs**\n▸ ${results.logging}\n\n` +
+          `💼 **4. Hiring & Freelance Desk**\n▸ ${results.hiring}\n\n` +
+          `🎫 **5. Support Ticket Dispatch**\n▸ ${results.tickets}\n\n` +
+          `🚀 **6. Bump Reminders**\n▸ ${results.bump}\n\n` +
+          `🍯 **7. Honeypot Anti-Raid Shield**\n▸ ${results.honeypot}\n\n` +
+          `🧠 **8. State Vault & Custom Rules**\n▸ ${results.memory}\n\n` +
+          `🌐 **9. Server Knowledge & AI Context**\n▸ ${results.serverScan}\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `✨ *Sit back and relax! EditX is managing member arrivals, roles, tickets, hiring threads, and security 24/7.*`
+        )
+        .setFooter({ text: `${guild.name} • 100% Autonomous Auto-Pilot` })
+        .setTimestamp();
+
+      return interaction.editReply({ embeds: [embed] });
+    }
+
+    if (interaction.commandName !== 'setup') return false;
+
+    const sub = interaction.options.getSubcommand();
+
+    if (!isAuthorized) {
+      return interaction.reply({ content: '❌ Administrator permission is required to configure server systems.', ephemeral: true });
+    }
+
+    // 1. ONE-CLICK AUTOMATED SETUP
+    if (sub === 'quick') {
+      await interaction.deferReply();
+      const dashboardEmbed = await this.executeQuickSetup(guild, channel);
       return interaction.editReply({ embeds: [dashboardEmbed] });
     }
 

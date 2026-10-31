@@ -15,7 +15,14 @@ class RolesModule {
     this.rolesDb = db.roles;
 
     // Check temporary roles every minute
-    setInterval(() => this.checkTempRoles(), 60 * 1000);
+    this._tempRolesInterval = setInterval(() => this.checkTempRoles(), 60 * 1000);
+  }
+
+  destroy() {
+    if (this._tempRolesInterval) {
+      clearInterval(this._tempRolesInterval);
+      this._tempRolesInterval = null;
+    }
   }
 
   getCommands() {
@@ -93,8 +100,8 @@ class RolesModule {
   async handleCommand(interaction) {
     const { commandName, options, guild } = interaction;
     const guildId = guild.id;
-    const BOT_OWNER_ID = '1320083615475830797';
-    const isAuthorized = interaction.user?.id === BOT_OWNER_ID ||
+    const BOT_OWNER_ID = this.client?.botOwnerId || process.env.BOT_OWNER_ID;
+    const isAuthorized = (typeof this.client?.isOwner === 'function' ? this.client.isOwner(interaction.user?.id) : interaction.user?.id === BOT_OWNER_ID) ||
                          interaction.user?.id === guild?.ownerId ||
                          Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator) ||
                                  interaction.member?.permissions?.has(PermissionFlagsBits.ManageRoles));

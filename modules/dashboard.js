@@ -64,7 +64,7 @@ class DashboardModule {
   }
 
   startWatchdog() {
-    setInterval(() => {
+    this._watchdogInterval = setInterval(() => {
       if (this.takeoverActive) {
         const elapsed = Date.now() - this.lastHeartbeat;
         if (elapsed > this.heartbeatTimeoutMs) {
@@ -72,6 +72,17 @@ class DashboardModule {
         }
       }
     }, 3000);
+  }
+
+  destroy() {
+    if (this._watchdogInterval) {
+      clearInterval(this._watchdogInterval);
+      this._watchdogInterval = null;
+    }
+    if (this.server) {
+      try { this.server.close(); } catch (e) {}
+      this.server = null;
+    }
   }
 
   isTakeoverActive(channelId = null) {
@@ -528,7 +539,8 @@ class DashboardModule {
 
     // Determine current active guild (via query param or fallback)
     const targetGuildId = parsedUrl.searchParams.get('guildId') || this.activeGuildId;
-    const guild = this.client.guilds.cache.get(targetGuildId) || this.client.guilds.cache.first();
+    const guild = this.client.guilds?.cache?.get?.(targetGuildId) ||
+                  (typeof this.client.guilds?.cache?.first === 'function' ? this.client.guilds.cache.first() : Array.from(this.client.guilds?.cache?.values?.() || [])[0]);
 
     // 1. Health check
     if (pathname === '/health' || pathname === '/ping') {
@@ -539,6 +551,19 @@ class DashboardModule {
         takeover: this.takeoverActive,
         timestamp: new Date().toISOString()
       });
+    }
+
+    // Optional DASHBOARD_SECRET gate for production deployments
+    const dashboardSecret = process.env.DASHBOARD_SECRET;
+    if (dashboardSecret && pathname.startsWith('/api/')) {
+      const authHeader = req.headers.authorization || '';
+      const providedToken = authHeader.replace(/^Bearer\s+/i, '').trim() ||
+                            req.headers['x-dashboard-secret'] ||
+                            parsedUrl.searchParams.get('token');
+      const isMutation = ['POST', 'DELETE', 'PUT', 'PATCH'].includes(method) || pathname === '/api/takeover' || pathname === '/api/execute';
+      if (isMutation && providedToken !== dashboardSecret) {
+        return sendJson({ error: 'Unauthorized: Valid DASHBOARD_SECRET required' }, 401);
+      }
     }
 
     // 2. Real-time SSE Stream
@@ -1679,6 +1704,7 @@ class DashboardModule {
       <div class="pill online"><span>●</span> Online</div>
       <div class="pill" id="memberCountPill">👥 238 Members</div>
       <div class="pill" id="boostTierPill">🚀 Boost Level 2</div>
+      <button class="pill" onclick="promptDashboardSecret()" title="Set DASHBOARD_SECRET token" style="cursor:pointer; background:rgba(88,101,242,0.15); border:1px solid rgba(88,101,242,0.4); color:#fff;">🔑 Auth</button>
     </div>
 
     <div class="takeover-box">
@@ -1829,6 +1855,53 @@ class DashboardModule {
     let takeoverEnabled = false;
     let replyTargetId = null;
 
+    const DASHBOARD_SECRET_KEY = 'editx_dashboard_token';
+
+    function getApiToken() {
+      const urlParam = new URLSearchParams(window.location.search).get('token');
+      if (urlParam) {
+        localStorage.setItem(DASHBOARD_SECRET_KEY, urlParam);
+        return urlParam;
+      }
+      return localStorage.getItem(DASHBOARD_SECRET_KEY) || '';
+    }
+
+    function promptDashboardSecret() {
+      const current = localStorage.getItem(DASHBOARD_SECRET_KEY) || '';
+      const input = prompt('Enter DASHBOARD_SECRET to authenticate cockpit actions:', current);
+      if (input !== null) {
+        const val = input.trim();
+        if (val) {
+          localStorage.setItem(DASHBOARD_SECRET_KEY, val);
+          alert('✅ Dashboard secret token saved.');
+        } else {
+          localStorage.removeItem(DASHBOARD_SECRET_KEY);
+          alert('ℹ️ Dashboard secret cleared.');
+        }
+      }
+    }
+
+    async function apiFetch(url, options = {}) {
+      const token = getApiToken();
+      const headers = { ...(options.headers || {}) };
+      if (token) {
+        headers['Authorization'] = 'Bearer ' + token;
+        headers['x-dashboard-secret'] = token;
+      }
+      const res = await fetch(url, { ...options, headers });
+      if (res.status === 401) {
+        const input = prompt('🔒 Operator Authorization Required\nEnter DASHBOARD_SECRET to execute control actions:');
+        if (input && input.trim()) {
+          const secret = input.trim();
+          localStorage.setItem(DASHBOARD_SECRET_KEY, secret);
+          headers['Authorization'] = 'Bearer ' + secret;
+          headers['x-dashboard-secret'] = secret;
+          return fetch(url, { ...options, headers });
+        }
+      }
+      return res;
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       loadGuilds();
       loadChannels();
@@ -1840,18 +1913,20 @@ class DashboardModule {
     });
 
     window.addEventListener('beforeunload', () => {
-      navigator.sendBeacon('/api/takeover/release');
+      const token = getApiToken();
+      const releaseUrl = '/api/takeover/release' + (token ? '?token=' + encodeURIComponent(token) : '');
+      navigator.sendBeacon(releaseUrl);
     });
 
     function sendHeartbeat() {
       if (takeoverEnabled) {
-        fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
+        apiFetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
       }
     }
 
     async function loadGuilds() {
       try {
-        const res = await fetch('/api/guilds');
+        const res = await apiFetch('/api/guilds');
         const data = await res.json();
         const sel = document.getElementById('guildSelector');
         sel.innerHTML = '';
@@ -1876,7 +1951,7 @@ class DashboardModule {
 
     async function updateGuildStatus() {
       try {
-        const res = await fetch('/api/status?guildId=' + currentGuildId);
+        const res = await apiFetch('/api/status?guildId=' + currentGuildId);
         const data = await res.json();
         if (data.botUser) {
           document.getElementById('botAvatar').src = data.botUser.avatar;
@@ -1895,13 +1970,13 @@ class DashboardModule {
       takeoverEnabled = !takeoverEnabled;
       setTakeoverUI(takeoverEnabled);
       if (takeoverEnabled) {
-        fetch('/api/takeover/enable', {
+        apiFetch('/api/takeover/enable', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ channelId: activeTargetId })
         });
       } else {
-        fetch('/api/takeover/release', { method: 'POST' });
+        apiFetch('/api/takeover/release', { method: 'POST' });
       }
     }
 
@@ -1922,7 +1997,7 @@ class DashboardModule {
     }
 
     function exitAndResumeBot() {
-      fetch('/api/takeover/release', { method: 'POST' }).then(() => {
+      apiFetch('/api/takeover/release', { method: 'POST' }).then(() => {
         setTakeoverUI(false);
         window.close();
       });
@@ -2207,7 +2282,7 @@ class DashboardModule {
       if (text.startsWith('/') || text.startsWith('!')) {
         const execId = appendCommandExecution(text);
         try {
-          const res = await fetch('/api/command/exec?guildId=' + currentGuildId, {
+          const res = await apiFetch('/api/command/exec?guildId=' + currentGuildId, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2251,14 +2326,14 @@ class DashboardModule {
 
       try {
         if (currentMode === 'channel') {
-          await fetch('/api/channels/' + activeTargetId + '/send', {
+          await apiFetch('/api/channels/' + activeTargetId + '/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content: text, replyTo: replyTargetId })
           });
           cancelReply();
         } else {
-          await fetch('/api/dm/' + activeTargetId + '/send', {
+          await apiFetch('/api/dm/' + activeTargetId + '/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content: text })
@@ -2279,7 +2354,7 @@ class DashboardModule {
       if (currentMode !== 'channel') return;
       if (!confirm('Purge last ' + amount + ' messages in #' + document.getElementById('activeChatTitle').textContent + '?')) return;
       try {
-        await fetch('/api/channels/' + activeTargetId + '/purge', {
+        await apiFetch('/api/channels/' + activeTargetId + '/purge', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ amount })
@@ -2304,14 +2379,14 @@ class DashboardModule {
 
       try {
         if (currentMode === 'channel') {
-          await fetch('/api/channels/' + activeTargetId + '/send', {
+          await apiFetch('/api/channels/' + activeTargetId + '/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ embed: { title, description, color, footer } })
           });
           setTimeout(loadMessages, 300);
         } else {
-          await fetch('/api/dm/' + activeTargetId + '/send', {
+          await apiFetch('/api/dm/' + activeTargetId + '/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ embed: { title, description, color, footer } })
@@ -2440,7 +2515,7 @@ class DashboardModule {
     async function memberAction(memberId, action) {
       if (!confirm('Execute ' + action + ' on member ID ' + memberId + '?')) return;
       try {
-        await fetch('/api/members/' + memberId + '/action?guildId=' + currentGuildId, {
+        await apiFetch('/api/members/' + memberId + '/action?guildId=' + currentGuildId, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action })
@@ -2451,7 +2526,7 @@ class DashboardModule {
 
     async function loadDirectives() {
       try {
-        const res = await fetch('/api/directives?guildId=' + currentGuildId);
+        const res = await apiFetch('/api/directives?guildId=' + currentGuildId);
         const data = await res.json();
         const list = document.getElementById('directivesList');
         list.innerHTML = '';
@@ -2471,7 +2546,7 @@ class DashboardModule {
       const text = input.value.trim();
       if (!text) return;
       try {
-        await fetch('/api/directives/add?guildId=' + currentGuildId, {
+        await apiFetch('/api/directives/add?guildId=' + currentGuildId, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ directive: text })
@@ -2483,7 +2558,7 @@ class DashboardModule {
 
     async function removeDirective(target) {
       try {
-        await fetch('/api/directives/remove?guildId=' + currentGuildId, {
+        await apiFetch('/api/directives/remove?guildId=' + currentGuildId, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ target })

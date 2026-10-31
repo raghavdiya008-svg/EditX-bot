@@ -37,6 +37,7 @@ const StarboardModule = require('./modules/starboard');
 const AIChatModule = require('./modules/ai_chat');
 const BotMemoryModule = require('./modules/bot_memory');
 const DMReminderModule = require('./modules/dm_reminder');
+const PrefixCommandsModule = require('./modules/prefix_commands');
 
 // Persistent Database Collections
 const db = {
@@ -85,6 +86,10 @@ const client = new Client({
 // Supreme Bot Owner Identity (Bypasses all guild-level permission restrictions)
 const BOT_OWNER_ID = process.env.BOT_OWNER_ID || '1320083615475830797';
 client.botOwnerId = BOT_OWNER_ID;
+client.isOwner = (userId) => {
+  if (!userId) return false;
+  return userId === client.botOwnerId || userId === process.env.BOT_OWNER_ID || userId === '1320083615475830797';
+};
 
 // Invite cache for tracking
 client.inviteCache = new Map();
@@ -110,12 +115,14 @@ const starboard = new StarboardModule(client, db);
 const aiChat = new AIChatModule(client, db, botMemory);
 aiChat.setHousekeeper(housekeeper);
 const dmReminder = new DMReminderModule(client, db);
+const PORT = process.env.PORT || 3005;
+
 const dashboard = new DashboardModule(client, db, botMemory);
 client.dashboard = dashboard;
+const prefixCommands = new PrefixCommandsModule(client, { quickSetup, botMemory, decoration, botOwnerId: BOT_OWNER_ID, port: PORT });
 
 // Built-in HTTP Health Check & Cockpit Dashboard Server
-const PORT = process.env.PORT || 3005;
-http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
   dashboard.handleHttpRequest(req, res);
 }).listen(PORT, () => {
   console.log(`[COCKPIT & HEALTH CHECK] Live Server Dashboard online on port ${PORT} (http://localhost:${PORT})`);
@@ -144,6 +151,20 @@ const modules = [
   dmReminder
 ];
 
+// Graceful Shutdown & Resource Cleanup Hook
+function shutdown() {
+  console.log('[SHUTDOWN] Tearing down modules and clearing active timers...');
+  for (const m of modules) {
+    if (typeof m.destroy === 'function') {
+      try { m.destroy(); } catch (e) {}
+    }
+  }
+  try { if (server && typeof server.close === 'function') server.close(); } catch (e) {}
+  try { if (client && typeof client.destroy === 'function') client.destroy(); } catch (e) {}
+}
+process.on('SIGINT', () => { shutdown(); process.exit(0); });
+process.on('SIGTERM', () => { shutdown(); process.exit(0); });
+
 client.once(Events.ClientReady, async () => {
   console.log(`[BOOT SUCCESS] Omni Enterprise System online as: ${client.user.tag}`);
 
@@ -164,6 +185,8 @@ client.once(Events.ClientReady, async () => {
     try {
       await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commandData });
       console.log(`[GUILD REGISTRY] ✅ Synced ${commandData.length} commands instantly to ${guild.name}`);
+      // Rate-limit safety: 350ms delay between guild REST puts to avoid Discord API 429 bursts
+      await new Promise(r => setTimeout(r, 350));
     } catch (gErr) {
       console.error(`[GUILD REGISTRY WARNING] Could not sync commands for ${guild.name}:`, gErr.message);
     }
@@ -261,11 +284,11 @@ client.on(Events.MessageUpdate, async (oldMsg, newMsg) => {
   }
 });
 
-client.on(Events.MessageDelete, async (message) => {
-  if (message && message.guild) {
-    await botMemory.handleRulesChannelEvent(message, 'delete');
-  }
-});
+// client.on(Events.MessageDelete, async (message) => { // Handled below in unified MessageDelete listener
+//   if (message && message.guild) {
+//     await botMemory.handleRulesChannelEvent(message, 'delete');
+//   }
+// });
 
 // Essential Event Routing: Honeypot, Autonomous Sentinel, Staff Copilot, Bump Buddy, Showcase Auto-Threads, Sticky Tags, Hiring Guard & Auto Translator
 client.on(Events.MessageCreate, async (message) => {
@@ -291,229 +314,9 @@ client.on(Events.MessageCreate, async (message) => {
   const handledDmDispatch = await dmReminder.handleDmDispatchCommand(message);
   if (handledDmDispatch) return;
 
-  // --- Owner & Admin Plain-Text Command Dispatcher ---
-  // Guarantees Bot Owner (1320083615475830797) can run commands even if Discord hides slash commands!
-  const isBotOwner = message.author.id === BOT_OWNER_ID;
-  const isServerAdmin = isBotOwner ||
-    message.author.id === message.guild.ownerId ||
-    Boolean(message.member?.permissions?.has(PermissionFlagsBits.Administrator));
-
-  let text = (message.content || '').trim();
-  let isPrefixCmd = false;
-  if (text.startsWith('!')) {
-    isPrefixCmd = true;
-    text = text.slice(1).trim();
-  } else if (client.user && (text.startsWith(`<@${client.user.id}>`) || text.startsWith(`<@!${client.user.id}>`))) {
-    const afterMention = text.replace(new RegExp(`^<@!?${client.user.id}>\\s*`), '').trim();
-    if (/^(autopilot|setup|scan|rules|memory|decorate|roles|help|dashboard|cockpit)/i.test(afterMention)) {
-      isPrefixCmd = true;
-      text = afterMention;
-    }
-  }
-
-  if (isPrefixCmd && isServerAdmin && !message.author.bot) {
-    const parts = text.split(/\s+/);
-    const cmd = (parts[0] || '').toLowerCase();
-    const sub = (parts[1] || '').toLowerCase();
-    const args = parts.slice(1);
-
-    if (cmd === 'autopilot') {
-      const waitMsg = await message.reply('⚡ **Activating 100% Autonomous Auto-Pilot...**').catch(() => null);
-      const results = await quickSetup.runAutoPilot(message.guild, true);
-      const embed = new EmbedBuilder()
-        .setColor(0x2ECC71)
-        .setTitle(`⚡・${message.guild.name} 100% Autonomous Auto-Pilot Online`)
-        .setDescription(
-          `Your server is operating on **complete autonomous auto-pilot**.\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `👋 **1. Welcomer & Canvas Cards**\n▸ ${results.welcomer}\n\n` +
-          `🏷️ **2. Auto-Role On Arrival**\n▸ ${results.autorole}\n\n` +
-          `📋 **3. Mod & Server Audit Logs**\n▸ ${results.logging}\n\n` +
-          `💼 **4. Hiring & Freelance Desk**\n▸ ${results.hiring}\n\n` +
-          `🎫 **5. Support Ticket Dispatch**\n▸ ${results.tickets}\n\n` +
-          `🚀 **6. Bump Reminders**\n▸ ${results.bump}\n\n` +
-          `🍯 **7. Honeypot Anti-Raid Shield**\n▸ ${results.honeypot}\n\n` +
-          `🧠 **8. State Vault & Custom Rules**\n▸ ${results.memory}\n\n` +
-          `🌐 **9. Server Knowledge & AI Context**\n▸ ${results.serverScan}\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-          `✨ *Autonomous operations are managing member arrivals, roles, tickets, hiring threads, and security 24/7.*`
-        )
-        .setFooter({ text: `${message.guild.name} • 100% Autonomous Auto-Pilot` })
-        .setTimestamp();
-      if (waitMsg) await waitMsg.edit({ content: null, embeds: [embed] }).catch(() => {});
-      return;
-    }
-
-    if (cmd === 'setup') {
-      if (sub === 'roles' || sub === 'reactionroles') {
-        const waitMsg = await message.reply('🎭 **Deploying interactive reaction role panels & verifying roles...**').catch(() => null);
-        const res = await quickSetup.deployReactionRoles(message.guild, message.channel);
-        if (waitMsg) await waitMsg.edit({ content: res }).catch(() => {});
-        return;
-      }
-      if (sub === 'create-roles' || sub === 'createroles') {
-        const waitMsg = await message.reply('👑 **Initializing complete server role hierarchy...**').catch(() => null);
-        const created = await quickSetup.createDefaultRoles(message.guild);
-        const textRes = `✅ **Role Hierarchy Initialized!**\nVerified/created ${created.length} roles:\n${created.map(r => `• <@&${r.id}>`).join('\n')}`;
-        if (waitMsg) await waitMsg.edit({ content: textRes }).catch(() => {});
-        return;
-      }
-      if (sub === 'quick') {
-        const waitMsg = await message.reply('⚡ **Running 1-Click Quick Setup...**').catch(() => null);
-        const fakeInteraction = {
-          guild: message.guild,
-          channel: message.channel,
-          user: message.author,
-          member: message.member,
-          commandName: 'setup',
-          options: { getSubcommand: () => 'quick' },
-          deferReply: async () => {},
-          editReply: async (data) => {
-            if (waitMsg) await waitMsg.edit(data).catch(() => {});
-          }
-        };
-        await quickSetup.handleCommand(fakeInteraction);
-        return;
-      }
-    }
-
-    if (cmd === 'scan') {
-      const waitMsg = await message.reply('🔍 **Deep-scanning channels, categories, roles & rules into bot memory...**').catch(() => null);
-      await botMemory.scanServer(message.guild, message.author);
-      if (waitMsg) await waitMsg.edit({ content: `✅ **Deep Server Scan Complete!**\nAI now has full knowledge of all channels, roles, and guidelines in **${message.guild.name}**.` }).catch(() => {});
-      return;
-    }
-
-    if (cmd === 'rules') {
-      if (sub === 'update') {
-        const waitMsg = await message.reply('📜 **Publishing and synchronizing community rules...**').catch(() => null);
-        const res = await botMemory.publishCommunityRules(message.guild, message.channel);
-        if (waitMsg) await waitMsg.edit(res).catch(() => {});
-        return;
-      }
-      if (sub === 'list') {
-        const directives = botMemory.getDirectivesList(message.guild.id);
-        if (!directives || directives.length === 0) {
-          return message.reply('📭 **No custom rules currently active in server memory.**\nUse `!rules add <rule>` to add one.').catch(() => {});
-        }
-        const formatted = directives.map((d, i) => `**${i + 1}.** ${d}`).join('\n\n');
-        const embed = new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle(`📋 Custom Bot Rules & Directives • ${message.guild.name} (${directives.length})`)
-          .setDescription(formatted)
-          .setFooter({ text: 'To delete a rule, use !rules remove <number> (e.g. !rules remove 1)' })
-          .setTimestamp();
-        return message.reply({ embeds: [embed] }).catch(() => {});
-      }
-      if (sub === 'remove' || sub === 'delete' || sub === 'rm') {
-        const target = args.slice(1).join(' ').trim();
-        if (!target) {
-          return message.reply('⚠️ Please specify rule number or keyword to remove. Example: `!rules remove 1`. Use `!rules list` to see rule numbers.').catch(() => {});
-        }
-        const res = await botMemory.removeDirective(message.guild, target);
-        if (res.success) {
-          return message.reply(`✅ **Rule Removed!**\n• Removed: "${res.removed}"\n• Remaining Rules: \`${res.remainingCount}\``).catch(() => {});
-        } else {
-          return message.reply(`❌ **Failed to remove rule:** ${res.error}`).catch(() => {});
-        }
-      }
-      if (sub === 'clear') {
-        const res = await botMemory.removeDirective(message.guild, 'all');
-        if (res.success) {
-          return message.reply(`✅ **All custom rules cleared from memory!**`).catch(() => {});
-        } else {
-          return message.reply(`❌ **Failed to clear directives:** ${res.error}`).catch(() => {});
-        }
-      }
-      if (sub === 'add') {
-        const instruction = args.slice(1).join(' ').trim();
-        if (!instruction) {
-          return message.reply('⚠️ Please provide directive text. Example: `!rules add Always be friendly to newcomers`').catch(() => {});
-        }
-        const res = await botMemory.addDirective(message.guild, instruction, message.author);
-        if (res.success) {
-          return message.reply(`🧠 **Directive Learned & Saved to Memory!**\n• **Rule:** "${instruction}"\n• **Vault Channel:** ${res.channelId ? `<#${res.channelId}>` : '`#bot-rules`'}`).catch(() => {});
-        } else {
-          return message.reply(`❌ **Failed to save directive:** ${res.error}`).catch(() => {});
-        }
-      }
-      if (sub === 'view' || !sub) {
-        const secDb = botMemory.db.security || botMemory.configDb;
-        const storedRules = secDb.get(`rules_${message.guild.id}`) ||
-          '1. Respect all members and maintain civil discussions.\n2. No spam, unsolicited promotion, or malicious links.\n3. Keep media in respective showcase channels.\n4. Follow all Discord Terms of Service.';
-        const viewEmbed = new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle(`📜 Active Community Rules • ${message.guild.name}`)
-          .setDescription(storedRules)
-          .setFooter({ text: 'Use !rules update to refresh and post to #rules' })
-          .setTimestamp();
-        return message.reply({ embeds: [viewEmbed] }).catch(() => {});
-      }
-    }
-
-    if (cmd === 'memory') {
-      if (sub === 'status' || !sub) {
-        const vaultChan = message.guild.channels.cache.find(c => c.name.includes('bot-memory'));
-        const rulesChan = message.guild.channels.cache.find(c => c.name.includes('bot-rules'));
-        const directives = botMemory.getDirectivesList(message.guild.id);
-        const embed = new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle(`🧠 ${message.guild.name} Memory Vault Health`)
-          .setDescription(
-            `• **Vault Channel**: ${vaultChan ? `<#${vaultChan.id}>` : '`#bot-memory`'}\n` +
-            `• **Rules Channel**: ${rulesChan ? `<#${rulesChan.id}>` : '`#bot-rules`'}\n` +
-            `• **Active Directives**: \`${directives.length}\`\n` +
-            `• **Memory Isolation**: 🔒 Strictly isolated to Guild ID \`${message.guild.id}\`\n` +
-            `• **Bot Owner**: <@${BOT_OWNER_ID}> (Supreme Authority)`
-          )
-          .setTimestamp();
-        return message.reply({ embeds: [embed] }).catch(() => {});
-      }
-      if (sub === 'backup') {
-        const waitMsg = await message.reply('💾 **Backing up guild state to #bot-memory...**').catch(() => null);
-        const success = await botMemory.backupGuildState(message.guild);
-        if (waitMsg) await waitMsg.edit({ content: success ? '✅ **State backup complete and recorded in #bot-memory!**' : '⚠️ Backup completed with warnings.' }).catch(() => {});
-        return;
-      }
-    }
-
-    if (cmd === 'decorate') {
-      if (sub === 'apply') {
-        const waitMsg = await message.reply('✨ **Applying non-destructive aesthetic makeover...**').catch(() => null);
-        const res = await decoration.applyStyling(message.guild);
-        if (waitMsg) await waitMsg.edit({ content: `💎 **Makeover Applied!**\nStyled \`${res.styledCategories}\` categories and \`${res.styledChannels}\` channels with 0 deletions.` }).catch(() => {});
-        return;
-      }
-    }
-
-    if (cmd === 'help') {
-      const helpEmbed = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle(`⚡ ${message.guild.name} Server Commands`)
-        .setDescription(
-          `**👑 Bot Owner (<@${BOT_OWNER_ID}>) & Server Admin Commands:**\n\n` +
-          `• \`!autopilot\` — Activate 100% Autonomous Auto-Pilot across the server\n` +
-          `• \`!setup quick\` — Run 1-click core setup (Welcomer, Tickets, Honeypot, Logging)\n` +
-          `• \`!setup roles\` — Deploy interactive reaction role panels in #roles\n` +
-          `• \`!setup create-roles\` — Create all standard server roles automatically\n` +
-          `• \`!scan server\` — Deep-scan channels, categories, roles & rules into bot memory\n` +
-          `• \`!rules update\` — Publish and synchronize official guidelines in #rules\n` +
-          `• \`!rules add <rule>\` — Add a new live directive for the bot to strictly obey\n` +
-          `• \`!rules view\` — View current server rules in memory\n` +
-          `• \`!memory status\` — Inspect server memory vault and isolation status\n` +
-          `• \`!memory backup\` — Force immediate backup to #bot-memory\n` +
-          `• \`!decorate apply\` — Non-destructively style category & channel names\n\n` +
-          `🔒 *All commands work unconditionally for the Bot Owner even without server Admin role.*`
-        )
-        .setFooter({ text: `${message.guild.name} • Supreme Command Engine` })
-        .setTimestamp();
-      return message.reply({ embeds: [helpEmbed] }).catch(() => {});
-    }
-
-    if (cmd === 'dashboard' || cmd === 'cockpit') {
-      return message.reply(`🎮 **EditX Server Cockpit & Management Screen:**\nRun \`npm run dashboard\` in your terminal to open your screen popup, or visit: http://localhost:${PORT}`).catch(() => {});
-    }
-  }
+    // Owner & Admin Plain-Text Command Dispatcher (!autopilot, !setup, !scan, !rules, etc.)
+  const handledPrefix = await prefixCommands.handle(message);
+  if (handledPrefix) return;
 
   // Real-time custom directives ingestion in #bot-rules
   await botMemory.handleRulesChannelEvent(message, 'create');
@@ -638,6 +441,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
           if (handled) return;
         } catch (err) {
           console.error(`[INTERACTION ERROR in ${mod.constructor.name}]`, err);
+        }
+      }
+    }
+    return;
+  }
+
+  // Slash Command Autocomplete Dispatcher
+  if (interaction.isAutocomplete()) {
+    for (const mod of modules) {
+      if (typeof mod.handleAutocomplete === 'function') {
+        try {
+          const handled = await mod.handleAutocomplete(interaction);
+          if (handled) return;
+        } catch (err) {
+          console.error(`[AUTOCOMPLETE ERROR in ${mod.constructor?.name || "module"}]`, err);
         }
       }
     }

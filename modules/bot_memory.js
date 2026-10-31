@@ -33,7 +33,14 @@ class BotMemoryModule {
     this.serverContextCache = new Map();
 
     // Scheduled periodic backups every 15 minutes
-    setInterval(() => this.runScheduledBackups(), 15 * 60 * 1000);
+    this._backupInterval = setInterval(() => this.runScheduledBackups(), 15 * 60 * 1000);
+  }
+
+  destroy() {
+    if (this._backupInterval) {
+      clearInterval(this._backupInterval);
+      this._backupInterval = null;
+    }
   }
 
   getCommands() {
@@ -123,8 +130,8 @@ class BotMemoryModule {
     if (interaction.commandName !== 'memory' && interaction.commandName !== 'scan' && interaction.commandName !== 'rule' && interaction.commandName !== 'rules') return false;
 
     const guild = interaction.guild;
-    const BOT_OWNER_ID = '1320083615475830797';
-    const isAuthorized = interaction.user?.id === BOT_OWNER_ID ||
+    const BOT_OWNER_ID = this.client?.botOwnerId || process.env.BOT_OWNER_ID;
+    const isAuthorized = (typeof this.client?.isOwner === 'function' ? this.client.isOwner(interaction.user?.id) : interaction.user?.id === BOT_OWNER_ID) ||
                          interaction.user?.id === guild?.ownerId ||
                          Boolean(interaction.member?.permissions?.has(PermissionFlagsBits.Administrator));
 
@@ -1026,7 +1033,8 @@ class BotMemoryModule {
           if (msgs && msgs.size > 0) {
             for (const msg of msgs.values()) {
               if (typeof target === 'string' && (target.toLowerCase() === 'all' || target.toLowerCase() === 'clear')) {
-                if (msg.author.id === this.client.user?.id || msg.author.id === '1320083615475830797') {
+                const isMsgOwner = typeof this.client?.isOwner === 'function' ? this.client.isOwner(msg.author.id) : msg.author.id === (this.client?.botOwnerId || process.env.BOT_OWNER_ID);
+                if (msg.author.id === this.client.user?.id || isMsgOwner) {
                   await msg.delete().catch(() => {});
                 }
               } else if (removedItem && msg.content && (msg.content.includes(removedItem) || removedItem.includes(msg.content.trim()))) {

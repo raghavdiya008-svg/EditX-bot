@@ -18,8 +18,8 @@ const client = new Client({
   ]
 });
 
-const TOKEN = process.env.DISCORD_BOT_TOKEN;
-const CLIENT_ID = '1538958753670500392';
+const TOKEN = process.env.DISCORD_TOKEN || process.env.DISCORD_BOT_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID || '1538958753670500392';
 
 async function runFlightCheck() {
   console.log('===============================================================');
