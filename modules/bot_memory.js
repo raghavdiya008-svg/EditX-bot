@@ -54,7 +54,11 @@ class BotMemoryModule {
         )
         .addSubcommand(s =>
           s.setName('restore')
-            .setDescription('Restore state from latest #bot-memory backup')
+            .setDescription('Restore state from latest #bot-memory backup or attached file')
+            .addAttachmentOption(o =>
+              o.setName('file')
+                .setDescription('Optional: Upload a backup JSON file directly')
+            )
         )
         .addSubcommand(s =>
           s.setName('rules')
@@ -258,9 +262,13 @@ class BotMemoryModule {
     }
 
     if (sub === 'restore') {
-      const result = await this.restoreState(guild);
+      const file = interaction.options.getAttachment('file');
+      const result = await this.restoreState(guild, file);
       if (result.success) {
-        return interaction.editReply(`✅ **State Restored**: Synchronized ${result.keysRestored} settings from <#${result.channelId}>.`);
+        if (result.isLocalActive) {
+          return interaction.editReply(`✅ **Local Memory Active**: Server already has \`${result.keysRestored}\` settings & directives active in the database! (Run \`/memory backup\` once channel permissions are set to sync to Discord).`);
+        }
+        return interaction.editReply(`✅ **State Restored**: Synchronized ${result.keysRestored} settings${result.channelId ? ` from <#${result.channelId}>` : ''}.`);
       } else {
         return interaction.editReply(`⚠️ **Restore Failed**: ${result.error}`);
       }
@@ -344,6 +352,20 @@ class BotMemoryModule {
     const existing = await this.findChannel(guild, ['bot-memory', 'bot_memory', 'memory-vault']);
     if (existing) {
       this.setChannelCache(guild.id, 'memoryChanId', existing.id);
+      // Auto-heal permissions if needed and bot has permission
+      const me = guild.members?.me || (typeof guild.members?.fetchMe === 'function' ? await guild.members.fetchMe().catch(() => null) : null);
+      if (me && typeof existing.permissionsFor === 'function' && typeof existing.permissionOverwrites?.edit === 'function') {
+        const perms = existing.permissionsFor(me);
+        if (perms && !perms.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks])) {
+          await existing.permissionOverwrites.edit(me.id, {
+            ViewChannel: true,
+            SendMessages: true,
+            EmbedLinks: true,
+            AttachFiles: true,
+            ReadMessageHistory: true
+          }).catch(() => {});
+        }
+      }
       return existing;
     }
 
@@ -388,6 +410,20 @@ class BotMemoryModule {
     const existing = await this.findChannel(guild, ['bot-rules', 'bot_rules', 'bot-directives', 'bot_directives']);
     if (existing) {
       this.setChannelCache(guild.id, 'rulesChanId', existing.id);
+      // Auto-heal permissions if needed and bot has permission
+      const me = guild.members?.me || (typeof guild.members?.fetchMe === 'function' ? await guild.members.fetchMe().catch(() => null) : null);
+      if (me && typeof existing.permissionsFor === 'function' && typeof existing.permissionOverwrites?.edit === 'function') {
+        const perms = existing.permissionsFor(me);
+        if (perms && !perms.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ReadMessageHistory])) {
+          await existing.permissionOverwrites.edit(me.id, {
+            ViewChannel: true,
+            SendMessages: true,
+            EmbedLinks: true,
+            ReadMessageHistory: true,
+            AddReactions: true
+          }).catch(() => {});
+        }
+      }
       return existing;
     }
 
@@ -639,6 +675,44 @@ class BotMemoryModule {
         } catch (cleanErr) {}
       }
 
+      // Check permissions in memory channel before attempting send
+      const me = guild.members?.me || (typeof guild.members?.fetchMe === 'function' ? await guild.members.fetchMe().catch(() => null) : null);
+      if (me && typeof memChan.permissionsFor === 'function') {
+        const perms = memChan.permissionsFor(me);
+        const requiredPerms = [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.EmbedLinks,
+          PermissionFlagsBits.AttachFiles
+        ];
+        if (perms && !perms.has(requiredPerms)) {
+          let healed = false;
+          if (typeof memChan.permissionOverwrites?.edit === 'function') {
+            try {
+              await memChan.permissionOverwrites.edit(me.id, {
+                ViewChannel: true,
+                SendMessages: true,
+                EmbedLinks: true,
+                AttachFiles: true,
+                ReadMessageHistory: true
+              });
+              healed = true;
+            } catch (pErr) {}
+          }
+          if (!healed) {
+            const missing = [];
+            if (!perms.has(PermissionFlagsBits.ViewChannel)) missing.push('View Channel');
+            if (!perms.has(PermissionFlagsBits.SendMessages)) missing.push('Send Messages');
+            if (!perms.has(PermissionFlagsBits.EmbedLinks)) missing.push('Embed Links');
+            if (!perms.has(PermissionFlagsBits.AttachFiles)) missing.push('Attach Files');
+            return {
+              success: false,
+              error: `Missing Permissions in #${memChan.name} (${missing.join(', ')}). In Discord channel settings for #${memChan.name}, please grant the bot's role 'View Channel', 'Send Messages', and 'Attach Files'.`
+            };
+          }
+        }
+      }
+
       const msg = await memChan.send({
         content: `📦 **EDITX_STATE_SNAPSHOT_V1** \`[${stateSnapshot.iso}]\``,
         embeds: [embed],
@@ -648,37 +722,69 @@ class BotMemoryModule {
       return { success: true, channelId: memChan.id, messageId: msg.id };
     } catch (err) {
       console.error('[BOT MEMORY BACKUP ERROR]', err);
-      return { success: false, error: err.message };
+      let errMsg = err.message;
+      if (err.message && err.message.toLowerCase().includes('missing permissions')) {
+        errMsg = `Missing Permissions: The bot lacks permission to post and attach files in #${memChan?.name || 'bot-memory'}. Please grant the bot 'Attach Files' & 'Send Messages' in #${memChan?.name || 'bot-memory'}.`;
+      }
+      return { success: false, error: errMsg };
     }
   }
 
   /**
    * Restores database state from latest #bot-memory backup
    */
-  async restoreState(guild) {
+  async restoreState(guild, fileAttachment = null) {
     try {
-      const memChan = await this.getMemoryChannel(guild);
-      if (!memChan) return { success: false, error: 'Memory channel unavailable' };
+      let snapshot = null;
+      let sourceChannelId = null;
 
-      const messages = await memChan.messages.fetch({ limit: 15 }).catch(() => null);
-      if (!messages || messages.size === 0) {
-        return { success: false, error: 'No previous state snapshots found in channel' };
+      if (fileAttachment) {
+        const res = await fetch(fileAttachment.url);
+        if (!res.ok) return { success: false, error: 'Could not download attached snapshot file' };
+        snapshot = await res.json();
+      } else {
+        const memChan = await this.getMemoryChannel(guild);
+        if (memChan) {
+          sourceChannelId = memChan.id;
+          if (memChan.messages && typeof memChan.messages.fetch === 'function') {
+            const messages = await memChan.messages.fetch({ limit: 15 }).catch(() => null);
+            if (messages && messages.size > 0) {
+              const snapshotMsg = Array.from(messages.values()).find(m =>
+                m.content && m.content.includes('EDITX_STATE_SNAPSHOT_V1') && m.attachments?.size > 0
+              );
+              if (snapshotMsg) {
+                const attachment = snapshotMsg.attachments.first();
+                const res = await fetch(attachment.url).catch(() => null);
+                if (res && res.ok) {
+                  snapshot = await res.json().catch(() => null);
+                }
+              }
+            }
+          }
+        }
       }
 
-      const snapshotMsg = Array.from(messages.values()).find(m =>
-        m.content && m.content.includes('EDITX_STATE_SNAPSHOT_V1') && m.attachments?.size > 0
-      );
-
-      if (!snapshotMsg) {
-        return { success: false, error: 'No valid snapshot file attached' };
+      if (!snapshot) {
+        // Fallback: Check if local database already holds intact memory for this guild
+        const existingDirectives = this.utilDb.get(`directives_${guild.id}`) || [];
+        const existingContext = this.utilDb.get(`server_context_${guild.id}`);
+        if (existingDirectives.length > 0 || existingContext) {
+          this.guildDirectives.set(guild.id, existingDirectives);
+          if (existingContext) this.serverContextCache.set(guild.id, existingContext);
+          return {
+            success: true,
+            channelId: sourceChannelId,
+            keysRestored: existingDirectives.length + (existingContext ? 1 : 0),
+            isLocalActive: true
+          };
+        }
+        return {
+          success: false,
+          error: 'No backup found in #bot-memory or attached file. Run `/memory backup` to create a snapshot in Discord, or attach a backup.json file to this command.'
+        };
       }
 
-      const attachment = snapshotMsg.attachments.first();
-      const res = await fetch(attachment.url);
-      if (!res.ok) return { success: false, error: 'Could not download snapshot attachment' };
-
-      const snapshot = await res.json();
-      if (!snapshot || snapshot.guildId !== guild.id) {
+      if (snapshot.guildId !== guild.id) {
         return { success: false, error: 'Snapshot guild mismatch or invalid format' };
       }
 
@@ -842,7 +948,7 @@ class BotMemoryModule {
 
 
       console.log(`[BOT MEMORY] Successfully restored ${restoredCount} database entries for ${guild.name} from #bot-memory!`);
-      return { success: true, channelId: memChan.id, keysRestored: restoredCount };
+      return { success: true, channelId: sourceChannelId, keysRestored: restoredCount };
 
     } catch (err) {
       console.error('[BOT MEMORY RESTORE ERROR]', err);
@@ -874,9 +980,14 @@ class BotMemoryModule {
             }
           }
         }
-        // When rules channel exists, its actual active messages are canonical
-        this.guildDirectives.set(guild.id, directives);
-        this.utilDb.set(`directives_${guild.id}`, directives, true);
+        // When rules channel exists, its actual active messages are canonical if non-empty
+        if (directives.length > 0) {
+          this.guildDirectives.set(guild.id, directives);
+          this.utilDb.set(`directives_${guild.id}`, directives, true);
+        } else {
+          const dbDirectives = this.utilDb.get(`directives_${guild.id}`) || [];
+          this.guildDirectives.set(guild.id, dbDirectives);
+        }
       } else {
         const dbDirectives = this.utilDb.get(`directives_${guild.id}`) || [];
         this.guildDirectives.set(guild.id, dbDirectives);
