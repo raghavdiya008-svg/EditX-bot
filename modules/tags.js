@@ -8,6 +8,8 @@ class TagsModule {
     this.stickyLastMsgId = new Map();
     // Cooldown: channelId → timestamp of last sticky repost (avoid spam)
     this.stickyCooldown = new Map();
+    // Concurrency lock: channelId set while reposting to eliminate duplicate sticky posts
+    this.stickyLocks = new Set();
   }
 
   getCommands() {
@@ -517,6 +519,9 @@ class TagsModule {
   }
 
   async checkStickyMessage(message) {
+    if (!message.channel?.id) return;
+    if (this.stickyLocks.has(message.channel.id)) return;
+
     try {
       const stickyKey = `sticky_${message.channel.id}`;
       const sticky = this.db.get(stickyKey);
@@ -531,22 +536,29 @@ class TagsModule {
       const cooldownMs = cooldownSec * 1000;
       if (cooldownMs > 0 && Date.now() - lastPost < cooldownMs) return;
 
-      // Delete previous sticky bot message
-      const prevMsgId = sticky.lastMsgId || this.stickyLastMsgId.get(message.channel.id);
-      if (prevMsgId) {
-        const oldMsg = await message.channel.messages.fetch(prevMsgId).catch(() => null);
-        if (oldMsg) await oldMsg.delete().catch(() => {});
-      }
-
-      // Repost sticky
-      const payload = this.buildStickyPayload(sticky, message.channel, message.guild);
-      const newMsg = await message.channel.send(payload);
-      this.stickyLastMsgId.set(message.channel.id, newMsg.id);
+      // Concurrency lock + immediate cooldown arming prevents burst duplicates
+      this.stickyLocks.add(message.channel.id);
       this.stickyCooldown.set(message.channel.id, Date.now());
 
-      // Persist to database so it survives bot reboots
-      sticky.lastMsgId = newMsg.id;
-      this.db.set(stickyKey, sticky);
+      try {
+        // Delete previous sticky bot message
+        const prevMsgId = sticky.lastMsgId || this.stickyLastMsgId.get(message.channel.id);
+        if (prevMsgId) {
+          const oldMsg = await message.channel.messages.fetch(prevMsgId).catch(() => null);
+          if (oldMsg) await oldMsg.delete().catch(() => {});
+        }
+
+        // Repost sticky
+        const payload = this.buildStickyPayload(sticky, message.channel, message.guild);
+        const newMsg = await message.channel.send(payload);
+        this.stickyLastMsgId.set(message.channel.id, newMsg.id);
+
+        // Persist to database so it survives bot reboots
+        sticky.lastMsgId = newMsg.id;
+        this.db.set(stickyKey, sticky);
+      } finally {
+        this.stickyLocks.delete(message.channel.id);
+      }
     } catch (e) { /* ignore */ }
   }
 }

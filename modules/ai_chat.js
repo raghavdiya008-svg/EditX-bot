@@ -857,6 +857,7 @@ ${customDirectives ? `\n6. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):
       try {
         const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
+          signal: AbortSignal.timeout(12000),
           headers: {
             'Authorization': `Bearer ${this.groqKey}`,
             'Content-Type': 'application/json'
@@ -893,7 +894,7 @@ ${customDirectives ? `\n6. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):
     // 2. Fallback to Google Gemini
     if (this.gemini) {
       try {
-        const res = await this.gemini.models.generateContent({
+        const geminiPromise = this.gemini.models.generateContent({
           model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
           contents: `${systemPrompt}\n\nUser Question:\n${prompt}`,
           config: {
@@ -901,6 +902,8 @@ ${customDirectives ? `\n6. MANDATORY LIVE SERVER DIRECTIVES (FINAL REITERATION):
             maxOutputTokens: 500
           }
         });
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini API request timed out after 12s')), 12000));
+        const res = await Promise.race([geminiPromise, timeoutPromise]);
         if (res.text && res.text.trim()) {
           return res.text.trim();
         }

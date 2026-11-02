@@ -1767,6 +1767,11 @@ class UtilityModule {
             if (recentDel && recentDel.size > 0) {
               const now = Date.now();
               for (const [delCode, delInfo] of recentDel.entries()) {
+                // Prune entries older than 60s
+                if (now - delInfo.deletedAt > 60000) {
+                  recentDel.delete(delCode);
+                  continue;
+                }
                 if (now - delInfo.deletedAt < 30000 && !updatedInvites.has(delCode)) {
                   inviterId = delInfo.inviterId;
                   usedCode = delCode;
@@ -1774,6 +1779,7 @@ class UtilityModule {
                   break;
                 }
               }
+              if (recentDel.size === 0) this.recentlyDeletedInvites.delete(member.guild.id);
             }
           }
 
@@ -2273,11 +2279,19 @@ class UtilityModule {
       if (!this.recentlyDeletedInvites.has(guildId)) {
         this.recentlyDeletedInvites.set(guildId, new Map());
       }
-      this.recentlyDeletedInvites.get(guildId).set(invite.code, {
+      const guildDeletedMap = this.recentlyDeletedInvites.get(guildId);
+      const now = Date.now();
+      // Prune stale deleted invites older than 60s
+      for (const [code, info] of guildDeletedMap.entries()) {
+        if (now - info.deletedAt > 60000) {
+          guildDeletedMap.delete(code);
+        }
+      }
+      guildDeletedMap.set(invite.code, {
         inviterId: typeof cached === 'object' ? cached.inviterId : null,
         uses: typeof cached === 'object' ? cached.uses : cached,
         maxUses: typeof cached === 'object' ? cached.maxUses : 1,
-        deletedAt: Date.now()
+        deletedAt: now
       });
       codeMap.delete(invite.code);
       if (this.db?.set) {
