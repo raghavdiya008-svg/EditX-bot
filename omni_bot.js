@@ -252,9 +252,10 @@ client.on(Events.GuildCreate, async (guild) => {
         await me.setNickname('edits bot').catch(() => {});
       }
     }
+    // 1. CRITICAL: Restore database state from #bot-memory FIRST before any other module runs
+    await botMemory.initGuild(guild);
     await quickSetup.runAutoPilot(guild);
     await utility.handleGuildCreate(guild);
-    await botMemory.initGuild(guild);
     await dmReminder.initGuild(guild);
   } catch (gErr) {
     console.error(`[GUILD CREATE ERROR ${guild.id}]:`, gErr.message);

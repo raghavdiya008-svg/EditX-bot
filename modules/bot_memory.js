@@ -530,25 +530,25 @@ class BotMemoryModule {
         timestamp: Date.now(),
         iso: new Date().toISOString(),
         utility: (() => {
-          const utilData = {
-            welcomer: this.utilDb.get(`welcomer_${guild.id}`),
-            stats: this.utilDb.get(`stats_${guild.id}`),
-            stats_channels: this.utilDb.get(`stats_channels_${guild.id}`),
-            aichat_cfg: this.utilDb.get(`aichat_cfg_${guild.id}`),
-            aichat_muted: this.utilDb.get(`aichat_muted_${guild.id}`),
-            aichat_muted_server: this.utilDb.get(`aichat_muted_server_${guild.id}`),
-            server_context: this.utilDb.get(`server_context_${guild.id}`),
-            bump_cfg: this.utilDb.get(`bump_cfg_${guild.id}`),
-            forhire_chan: this.utilDb.get(`forhire_chan_${guild.id}`),
-            invite_tracker_chan: this.utilDb.get(`invite_tracker_channel_${guild.id}`)
-          };
-          if (typeof this.utilDb.entries === 'function') {
+          const utilData = {};
+          if (typeof this.utilDb?.entries === 'function') {
             for (const [k, v] of this.utilDb.entries()) {
-              if (k.includes(guild.id) && !utilData[k]) {
+              if (k.includes(guild.id)) {
                 utilData[k] = v;
               }
             }
           }
+          // Canonical aliases for backward compatibility
+          utilData.welcomer = this.utilDb.get(`welcomer_${guild.id}`) || null;
+          utilData.stats = this.utilDb.get(`stats_${guild.id}`) || null;
+          utilData.stats_channels = this.utilDb.get(`stats_channels_${guild.id}`) || null;
+          utilData.aichat_cfg = this.utilDb.get(`aichat_cfg_${guild.id}`) || null;
+          utilData.aichat_muted = this.utilDb.get(`aichat_muted_${guild.id}`) || null;
+          utilData.aichat_muted_server = this.utilDb.get(`aichat_muted_server_${guild.id}`);
+          utilData.server_context = this.utilDb.get(`server_context_${guild.id}`) || null;
+          utilData.bump_cfg = this.utilDb.get(`bump_cfg_${guild.id}`) || null;
+          utilData.forhire_chan = this.utilDb.get(`forhire_chan_${guild.id}`) || null;
+          utilData.invite_tracker_chan = this.utilDb.get(`invite_tracker_channel_${guild.id}`) || null;
           return utilData;
         })(),
         config: {
@@ -577,7 +577,7 @@ class BotMemoryModule {
           };
         })(),
         xp: (() => {
-          if (!this.db.xp) return null;
+          if (!this.db.xp || typeof this.db.xp.entries !== 'function') return null;
           const data = {};
           for (const [k, v] of this.db.xp.entries()) {
             if (k.startsWith(`${guild.id}_`)) data[k] = v;
@@ -585,7 +585,7 @@ class BotMemoryModule {
           return data;
         })(),
         invites: (() => {
-          if (!this.db.invites) return null;
+          if (!this.db.invites || typeof this.db.invites.entries !== 'function') return null;
           const data = {};
           for (const [k, v] of this.db.invites.entries()) {
             if (
@@ -601,7 +601,7 @@ class BotMemoryModule {
           return data;
         })(),
         roles: (() => {
-          if (!this.db.roles) return null;
+          if (!this.db.roles || typeof this.db.roles.entries !== 'function') return null;
           const data = {};
           for (const [k, v] of this.db.roles.entries()) {
             if (k.startsWith(guild.id) || k.includes(guild.id)) data[k] = v;
@@ -609,7 +609,7 @@ class BotMemoryModule {
           return data;
         })(),
         tags: (() => {
-          if (!this.db.tags) return null;
+          if (!this.db.tags || typeof this.db.tags.entries !== 'function') return null;
           const data = {};
           const guildChanIds = new Set(guild.channels?.cache ? Array.from(guild.channels.cache.keys()) : []);
           for (const [k, v] of this.db.tags.entries()) {
@@ -625,7 +625,7 @@ class BotMemoryModule {
           return data;
         })(),
         cases: (() => {
-          if (!this.db.cases) return null;
+          if (!this.db.cases || typeof this.db.cases.entries !== 'function') return null;
           const data = {};
           for (const [k, v] of this.db.cases.entries()) {
             if (k.startsWith(`${guild.id}_`) || k.includes(guild.id)) data[k] = v;
@@ -633,7 +633,7 @@ class BotMemoryModule {
           return data;
         })(),
         starboard: (() => {
-          if (!this.db.starboard) return null;
+          if (!this.db.starboard || typeof this.db.starboard.entries !== 'function') return null;
           const data = {};
           for (const [k, v] of this.db.starboard.entries()) {
             if (k.startsWith(`${guild.id}_`) || k.includes(guild.id)) data[k] = v;
@@ -641,7 +641,7 @@ class BotMemoryModule {
           return data;
         })(),
         giveaways: (() => {
-          if (!this.db.giveaways) return null;
+          if (!this.db.giveaways || typeof this.db.giveaways.entries !== 'function') return null;
           const data = {};
           for (const [k, v] of this.db.giveaways.entries()) {
             if (k.startsWith(`${guild.id}_`) || k.includes(guild.id)) data[k] = v;
@@ -649,7 +649,7 @@ class BotMemoryModule {
           return data;
         })(),
         dm: (() => {
-          if (!this.db.dm) return null;
+          if (!this.db.dm || typeof this.db.dm.entries !== 'function') return null;
           const data = {};
           for (const [k, v] of this.db.dm.entries()) {
             if (k.startsWith(`${guild.id}_`) || k.includes(guild.id)) data[k] = v;
@@ -810,21 +810,19 @@ class BotMemoryModule {
       // Restore utility DB entries
       if (snapshot.utility) {
         for (const [k, v] of Object.entries(snapshot.utility)) {
-          if (k === 'welcomer') this.utilDb.set(`welcomer_${guild.id}`, v);
-          else if (k === 'stats') this.utilDb.set(`stats_${guild.id}`, v);
-          else if (k === 'stats_channels') this.utilDb.set(`stats_channels_${guild.id}`, v);
-          else if (k === 'aichat_cfg') this.utilDb.set(`aichat_cfg_${guild.id}`, v);
-          else if (k === 'aichat_muted') this.utilDb.set(`aichat_muted_${guild.id}`, v);
-          else if (k === 'aichat_muted_server') this.utilDb.set(`aichat_muted_server_${guild.id}`, v);
-          else if (k === 'server_context') {
-            this.utilDb.set(`server_context_${guild.id}`, v);
-            this.serverContextCache.set(guild.id, v);
+          if (k.includes(guild.id)) {
+            this.utilDb.set(k, v);
+            if (k === `server_context_${guild.id}`) this.serverContextCache.set(guild.id, v);
+            restoredCount++;
+          } else {
+            // Backward compatibility for legacy snapshots storing aliases
+            const fullKey = k === 'invite_tracker_chan' ? `invite_tracker_channel_${guild.id}` : `${k}_${guild.id}`;
+            if (!this.utilDb.get(fullKey) && v !== null && v !== undefined) {
+              this.utilDb.set(fullKey, v);
+              if (k === 'server_context') this.serverContextCache.set(guild.id, v);
+              restoredCount++;
+            }
           }
-          else if (k === 'bump_cfg') this.utilDb.set(`bump_cfg_${guild.id}`, v);
-          else if (k === 'forhire_chan') this.utilDb.set(`forhire_chan_${guild.id}`, v);
-          else if (k === 'invite_tracker_chan') this.utilDb.set(`invite_tracker_channel_${guild.id}`, v);
-          else if (k.includes(guild.id)) this.utilDb.set(k, v);
-          restoredCount++;
         }
       }
 
@@ -955,12 +953,14 @@ class BotMemoryModule {
       // Ensure all restored data is flushed to disk immediately on ephemeral hosting (Render)
       if (this.db) {
         for (const d of Object.values(this.db)) {
-          if (d && typeof d.saveSync === 'function') d.saveSync();
-          else if (d && typeof d.flush === 'function') d.flush();
+          if (d && typeof d.flush === 'function') d.flush();
+          else if (d && typeof d.saveSync === 'function') d.saveSync();
         }
       }
-      if (this.utilDb && typeof this.utilDb.saveSync === 'function') this.utilDb.saveSync();
-      if (this.configDb && typeof this.configDb.saveSync === 'function') this.configDb.saveSync();
+      if (this.utilDb && typeof this.utilDb.flush === 'function') this.utilDb.flush();
+      else if (this.utilDb && typeof this.utilDb.saveSync === 'function') this.utilDb.saveSync();
+      if (this.configDb && typeof this.configDb.flush === 'function') this.configDb.flush();
+      else if (this.configDb && typeof this.configDb.saveSync === 'function') this.configDb.saveSync();
 
 
       console.log(`[BOT MEMORY] Successfully restored ${restoredCount} database entries for ${guild.name} from #bot-memory!`);

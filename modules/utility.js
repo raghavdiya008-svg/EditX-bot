@@ -1719,12 +1719,17 @@ class UtilityModule {
     try {
       const me = member.guild.members?.me || (member.guild.members?.fetchMe ? await member.guild.members.fetchMe().catch(() => null) : null);
       if (me && (me.permissions?.has(PermissionFlagsBits.ManageGuild) || me.permissions?.has(PermissionFlagsBits.Administrator))) {
-        let cachedCodes = this.client.inviteCache?.get(member.guild.id);
+        if (!this.client.inviteCache) this.client.inviteCache = new Map();
+        let cachedCodes = this.client.inviteCache.get(member.guild.id);
         if (!cachedCodes || cachedCodes.size === 0) {
           const diskData = this.db?.get ? this.db.get(`invite_cache_${member.guild.id}`) : null;
           if (diskData && Array.isArray(diskData) && diskData.length > 0) {
-            cachedCodes = new Map(diskData);
-            this.client.inviteCache.set(member.guild.id, cachedCodes);
+            try {
+              cachedCodes = new Map(diskData);
+              this.client.inviteCache.set(member.guild.id, cachedCodes);
+            } catch (mErr) {
+              cachedCodes = new Map();
+            }
           } else {
             cachedCodes = cachedCodes || new Map();
           }
