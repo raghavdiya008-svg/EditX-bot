@@ -211,9 +211,12 @@ client.once(Events.ClientReady, async () => {
           await me.setNickname('edits bot').catch(() => {});
         }
       }
+      // 1. CRITICAL: Restore database state from #bot-memory FIRST before any other module runs
+      await botMemory.initGuild(guild);
+      console.log(`[AUTOPILOT HYDRATION] Database state restored from #bot-memory for ${guild.name}`);
+
       await quickSetup.runAutoPilot(guild);
       await utility.handleGuildCreate(guild);
-      await botMemory.initGuild(guild);
       await dmReminder.initGuild(guild);
     } catch (gInitErr) {
       console.error(`[GUILD INIT ERROR ${guild.id}]:`, gInitErr.message);

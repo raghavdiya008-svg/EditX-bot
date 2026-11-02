@@ -529,17 +529,28 @@ class BotMemoryModule {
         guildName: guild.name,
         timestamp: Date.now(),
         iso: new Date().toISOString(),
-        utility: {
-          welcomer: this.utilDb.get(`welcomer_${guild.id}`),
-          stats: this.utilDb.get(`stats_${guild.id}`),
-          stats_channels: this.utilDb.get(`stats_channels_${guild.id}`),
-          aichat_cfg: this.utilDb.get(`aichat_cfg_${guild.id}`),
-          aichat_muted: this.utilDb.get(`aichat_muted_${guild.id}`),
-          aichat_muted_server: this.utilDb.get(`aichat_muted_server_${guild.id}`),
-          server_context: this.utilDb.get(`server_context_${guild.id}`),
-          bump_cfg: this.utilDb.get(`bump_cfg_${guild.id}`),
-          forhire_chan: this.utilDb.get(`forhire_chan_${guild.id}`)
-        },
+        utility: (() => {
+          const utilData = {
+            welcomer: this.utilDb.get(`welcomer_${guild.id}`),
+            stats: this.utilDb.get(`stats_${guild.id}`),
+            stats_channels: this.utilDb.get(`stats_channels_${guild.id}`),
+            aichat_cfg: this.utilDb.get(`aichat_cfg_${guild.id}`),
+            aichat_muted: this.utilDb.get(`aichat_muted_${guild.id}`),
+            aichat_muted_server: this.utilDb.get(`aichat_muted_server_${guild.id}`),
+            server_context: this.utilDb.get(`server_context_${guild.id}`),
+            bump_cfg: this.utilDb.get(`bump_cfg_${guild.id}`),
+            forhire_chan: this.utilDb.get(`forhire_chan_${guild.id}`),
+            invite_tracker_chan: this.utilDb.get(`invite_tracker_channel_${guild.id}`)
+          };
+          if (typeof this.utilDb.entries === 'function') {
+            for (const [k, v] of this.utilDb.entries()) {
+              if (k.includes(guild.id) && !utilData[k]) {
+                utilData[k] = v;
+              }
+            }
+          }
+          return utilData;
+        })(),
         config: {
           guildConfig: this.configDb.get(guild.id)
         },
@@ -577,7 +588,13 @@ class BotMemoryModule {
           if (!this.db.invites) return null;
           const data = {};
           for (const [k, v] of this.db.invites.entries()) {
-            if (k.startsWith(`${guild.id}_`) || k.startsWith(`invitedBy_${guild.id}_`) || k.startsWith(`invite_rewards_${guild.id}`)) {
+            if (
+              k.startsWith(`${guild.id}_`) ||
+              k.startsWith(`invitedBy_${guild.id}_`) ||
+              k.startsWith(`invite_rewards_${guild.id}`) ||
+              k.startsWith(`invite_cache_${guild.id}`) ||
+              k.includes(guild.id)
+            ) {
               data[k] = v;
             }
           }
@@ -792,41 +809,21 @@ class BotMemoryModule {
 
       // Restore utility DB entries
       if (snapshot.utility) {
-        if (snapshot.utility.welcomer) {
-          this.utilDb.set(`welcomer_${guild.id}`, snapshot.utility.welcomer);
-          restoredCount++;
-        }
-        if (snapshot.utility.stats) {
-          this.utilDb.set(`stats_${guild.id}`, snapshot.utility.stats);
-          restoredCount++;
-        }
-        if (snapshot.utility.stats_channels) {
-          this.utilDb.set(`stats_channels_${guild.id}`, snapshot.utility.stats_channels);
-          restoredCount++;
-        }
-        if (snapshot.utility.aichat_cfg) {
-          this.utilDb.set(`aichat_cfg_${guild.id}`, snapshot.utility.aichat_cfg);
-          restoredCount++;
-        }
-        if (snapshot.utility.aichat_muted) {
-          this.utilDb.set(`aichat_muted_${guild.id}`, snapshot.utility.aichat_muted);
-          restoredCount++;
-        }
-        if (snapshot.utility.aichat_muted_server !== undefined) {
-          this.utilDb.set(`aichat_muted_server_${guild.id}`, snapshot.utility.aichat_muted_server);
-          restoredCount++;
-        }
-        if (snapshot.utility.server_context) {
-          this.utilDb.set(`server_context_${guild.id}`, snapshot.utility.server_context);
-          this.serverContextCache.set(guild.id, snapshot.utility.server_context);
-          restoredCount++;
-        }
-        if (snapshot.utility.bump_cfg) {
-          this.utilDb.set(`bump_cfg_${guild.id}`, snapshot.utility.bump_cfg);
-          restoredCount++;
-        }
-        if (snapshot.utility.forhire_chan) {
-          this.utilDb.set(`forhire_chan_${guild.id}`, snapshot.utility.forhire_chan);
+        for (const [k, v] of Object.entries(snapshot.utility)) {
+          if (k === 'welcomer') this.utilDb.set(`welcomer_${guild.id}`, v);
+          else if (k === 'stats') this.utilDb.set(`stats_${guild.id}`, v);
+          else if (k === 'stats_channels') this.utilDb.set(`stats_channels_${guild.id}`, v);
+          else if (k === 'aichat_cfg') this.utilDb.set(`aichat_cfg_${guild.id}`, v);
+          else if (k === 'aichat_muted') this.utilDb.set(`aichat_muted_${guild.id}`, v);
+          else if (k === 'aichat_muted_server') this.utilDb.set(`aichat_muted_server_${guild.id}`, v);
+          else if (k === 'server_context') {
+            this.utilDb.set(`server_context_${guild.id}`, v);
+            this.serverContextCache.set(guild.id, v);
+          }
+          else if (k === 'bump_cfg') this.utilDb.set(`bump_cfg_${guild.id}`, v);
+          else if (k === 'forhire_chan') this.utilDb.set(`forhire_chan_${guild.id}`, v);
+          else if (k === 'invite_tracker_chan') this.utilDb.set(`invite_tracker_channel_${guild.id}`, v);
+          else if (k.includes(guild.id)) this.utilDb.set(k, v);
           restoredCount++;
         }
       }
@@ -898,6 +895,15 @@ class BotMemoryModule {
           invCount++;
         }
         if (invCount > 0) restoredCount += invCount;
+
+        // Re-hydrate in-memory client.inviteCache so join tracking works immediately
+        if (this.client?.inviteCache) {
+          const cachedInviteData = this.db.invites.get(`invite_cache_${guild.id}`);
+          if (cachedInviteData && Array.isArray(cachedInviteData)) {
+            this.client.inviteCache.set(guild.id, new Map(cachedInviteData));
+            console.log(`[BOT MEMORY] Re-hydrated ${cachedInviteData.length} invite codes into in-memory invite cache for ${guild.name}`);
+          }
+        }
       }
 
       // Roles, Tags, Cases, Starboard & Giveaways Restore
@@ -945,6 +951,16 @@ class BotMemoryModule {
         restoredCount += snapshot.directives.length;
       }
       // ────────────────────────────────────────────────────────────────────────────
+
+      // Ensure all restored data is flushed to disk immediately on ephemeral hosting (Render)
+      if (this.db) {
+        for (const d of Object.values(this.db)) {
+          if (d && typeof d.saveSync === 'function') d.saveSync();
+          else if (d && typeof d.flush === 'function') d.flush();
+        }
+      }
+      if (this.utilDb && typeof this.utilDb.saveSync === 'function') this.utilDb.saveSync();
+      if (this.configDb && typeof this.configDb.saveSync === 'function') this.configDb.saveSync();
 
 
       console.log(`[BOT MEMORY] Successfully restored ${restoredCount} database entries for ${guild.name} from #bot-memory!`);
