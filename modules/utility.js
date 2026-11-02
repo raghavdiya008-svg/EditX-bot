@@ -1719,8 +1719,17 @@ class UtilityModule {
     try {
       const me = member.guild.members?.me || (member.guild.members?.fetchMe ? await member.guild.members.fetchMe().catch(() => null) : null);
       if (me && (me.permissions?.has(PermissionFlagsBits.ManageGuild) || me.permissions?.has(PermissionFlagsBits.Administrator))) {
-        const cachedCodes = this.client.inviteCache?.get(member.guild.id) || new Map();
-        const updatedInvites = await member.guild.invites?.fetch().catch(() => null);
+        let cachedCodes = this.client.inviteCache?.get(member.guild.id);
+        if (!cachedCodes || cachedCodes.size === 0) {
+          const diskData = this.db?.get ? this.db.get(`invite_cache_${member.guild.id}`) : null;
+          if (diskData && Array.isArray(diskData) && diskData.length > 0) {
+            cachedCodes = new Map(diskData);
+            this.client.inviteCache.set(member.guild.id, cachedCodes);
+          } else {
+            cachedCodes = cachedCodes || new Map();
+          }
+        }
+        let updatedInvites = await member.guild.invites?.fetch().catch(() => null);
 
         // Check if vanity URL was used
         if (member.guild.vanityURLCode) {
@@ -1778,6 +1787,24 @@ class UtilityModule {
             }
           }
 
+          // If still not found, retry once after 800ms to combat Discord API replication lag
+          if (!inviterId && !isVanity && cachedCodes.size > 0) {
+            await new Promise(r => setTimeout(r, 800));
+            const retriedInvites = await member.guild.invites?.fetch().catch(() => null);
+            if (retriedInvites) {
+              for (const [code, inv] of retriedInvites) {
+                const cached = cachedCodes.get(code);
+                const prevUses = (typeof cached === 'object' ? cached.uses : cached) || 0;
+                if (inv.uses > prevUses) {
+                  inviterId = inv.inviter?.id;
+                  usedCode = code;
+                  break;
+                }
+              }
+              updatedInvites = retriedInvites;
+            }
+          }
+
           // Refresh the cache
           const refreshedMap = new Map();
           updatedInvites.forEach(inv => {
@@ -1789,6 +1816,9 @@ class UtilityModule {
             });
           });
           this.client.inviteCache.set(member.guild.id, refreshedMap);
+          if (this.db?.set) {
+            this.db.set(`invite_cache_${member.guild.id}`, Array.from(refreshedMap.entries()));
+          }
         }
       }
     } catch (e) {
@@ -2224,6 +2254,9 @@ class UtilityModule {
       inviterId: invite.inviter?.id || null
     });
     this.client.inviteCache.set(guildId, codeMap);
+    if (this.db?.set) {
+      this.db.set(`invite_cache_${guildId}`, Array.from(codeMap.entries()));
+    }
   }
 
   handleInviteDelete(invite) {
@@ -2242,6 +2275,9 @@ class UtilityModule {
         deletedAt: Date.now()
       });
       codeMap.delete(invite.code);
+      if (this.db?.set) {
+        this.db.set(`invite_cache_${guildId}`, Array.from(codeMap.entries()));
+      }
     }
   }
 
@@ -2262,6 +2298,9 @@ class UtilityModule {
             });
           });
           this.client.inviteCache.set(guild.id, codeMap);
+          if (this.db?.set) {
+            this.db.set(`invite_cache_${guild.id}`, Array.from(codeMap.entries()));
+          }
           console.log(`[INVITE TRACKER] ✅ Cached ${codeMap.size} invite codes for guild: ${guild.name}`);
         }
         if (guild.vanityURLCode) {
